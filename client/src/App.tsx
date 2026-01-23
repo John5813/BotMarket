@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/Home";
 import BotDetail from "@/pages/BotDetail";
+import Admin from "@/pages/Admin";
 import { useAuth } from "@/hooks/use-auth";
 
 function Router() {
@@ -26,6 +27,7 @@ function Router() {
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/bot/:id" component={BotDetail} />
+      <Route path="/admin" component={Admin} />
       <Route component={NotFound} />
     </Switch>
   );
