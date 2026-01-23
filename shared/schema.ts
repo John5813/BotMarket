@@ -1,18 +1,21 @@
-import { sql } from "drizzle-orm";
-import { pgTable, text, varchar } from "drizzle-orm/pg-core";
+export * from "./models/auth";
+import { pgTable, text, serial, integer, boolean, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-export const users = pgTable("users", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  username: text("username").notNull().unique(),
-  password: text("password").notNull(),
+export const bots = pgTable("bots", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull(),
+  price: text("price").notNull(), // "Tekin", "50 000 so'm", etc.
+  imageUrl: text("image_url").notNull(),
+  demoUrl: text("demo_url").notNull(),
+  category: text("category").notNull(),
+  features: text("features"), // stored as JSON string or simple text description
+  username: text("username").notNull(), // Telegram username without @
 });
 
-export const insertUserSchema = createInsertSchema(users).pick({
-  username: true,
-  password: true,
-});
+export const insertBotSchema = createInsertSchema(bots).omit({ id: true });
 
-export type InsertUser = z.infer<typeof insertUserSchema>;
-export type User = typeof users.$inferSelect;
+export type Bot = typeof bots.$inferSelect;
+export type InsertBot = z.infer<typeof insertBotSchema>;
