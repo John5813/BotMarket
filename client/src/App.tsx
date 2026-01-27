@@ -7,6 +7,7 @@ import NotFound from "@/pages/not-found";
 import Home from "@/pages/Home";
 import BotDetail from "@/pages/BotDetail";
 import Admin from "@/pages/Admin";
+import BotRunner from "@/pages/BotRunner";
 import { useAuth } from "@/hooks/use-auth";
 
 function Router() {
@@ -27,6 +28,7 @@ function Router() {
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/bot/:id" component={BotDetail} />
+      <Route path="/bot/:id/run" component={BotRunner} />
       <Route path="/admin" component={Admin} />
       <Route component={NotFound} />
     </Switch>

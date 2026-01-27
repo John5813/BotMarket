@@ -122,18 +122,13 @@ export default function BotDetail() {
               </div>
 
               <div className="flex flex-col sm:flex-row gap-4 mb-10">
-                <a 
-                  href={bot.demoUrl} 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="flex-1"
-                >
-                  <Button size="lg" variant="outline" className="w-full h-14 text-base font-semibold border-2 rounded-xl hover:bg-secondary/50 hover:text-primary transition-all">
+                <Link href={`/bot/${id}/run`} className="flex-1">
+                  <Button size="lg" variant="outline" className="w-full h-14 text-base font-semibold border-2 rounded-xl hover:bg-secondary/50 hover:text-primary transition-all" data-testid="button-try-bot">
                     <MessageCircle className="mr-2 h-5 w-5" />
                     Ishlatib ko'rish
                   </Button>
-                </a>
-                <Button size="lg" className="flex-1 h-14 text-base font-semibold rounded-xl bg-primary hover:bg-primary/90 shadow-lg shadow-primary/25 hover:shadow-primary/40 hover:-translate-y-0.5 transition-all duration-200">
+                </Link>
+                <Button size="lg" className="flex-1 h-14 text-base font-semibold rounded-xl bg-primary hover:bg-primary/90 shadow-lg shadow-primary/25 hover:shadow-primary/40 hover:-translate-y-0.5 transition-all duration-200" data-testid="button-buy-bot">
                   <ShoppingCart className="mr-2 h-5 w-5" />
                   Sotib olish
                 </Button>
