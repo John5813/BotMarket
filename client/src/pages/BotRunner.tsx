@@ -28,14 +28,10 @@ export default function BotRunner() {
 
   const createInstanceMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("/api/bot-instances", {
-        method: "POST",
-        body: JSON.stringify({
-          botId: Number(id),
-          telegramToken,
-          adminTelegramId: adminTelegramId || null,
-        }),
-        headers: { "Content-Type": "application/json" },
+      const res = await apiRequest("POST", "/api/bot-instances", {
+        botId: Number(id),
+        telegramToken,
+        adminTelegramId: adminTelegramId || null,
       });
       return res.json();
     },
@@ -50,9 +46,7 @@ export default function BotRunner() {
 
   const startBotMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest(`/api/bot-instances/${instanceId}/start`, {
-        method: "POST",
-      });
+      const res = await apiRequest("POST", `/api/bot-instances/${instanceId}/start`);
       return res.json();
     },
     onSuccess: (data) => {
@@ -66,9 +60,7 @@ export default function BotRunner() {
 
   const stopBotMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest(`/api/bot-instances/${instanceId}/stop`, {
-        method: "POST",
-      });
+      const res = await apiRequest("POST", `/api/bot-instances/${instanceId}/stop`);
       return res.json();
     },
     onSuccess: (data) => {
