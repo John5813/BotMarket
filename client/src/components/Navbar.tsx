@@ -104,9 +104,9 @@ export function Navbar() {
               {isAuthenticated ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" className="relative h-10 w-10 rounded-full ring-2 ring-primary/10 hover:ring-primary/30 transition-all">
+                    <Button variant="ghost" className="relative h-10 w-10 rounded-full ring-2 ring-primary/10 hover:ring-primary/30 transition-all" data-testid="button-user-menu">
                       <Avatar className="h-10 w-10">
-                        <AvatarImage src={user?.profileImageUrl} alt={user?.firstName || "User"} />
+                        <AvatarImage src={user?.profileImageUrl ?? undefined} alt={user?.firstName || "User"} />
                         <AvatarFallback className="bg-primary/10 text-primary">
                           {user?.firstName?.charAt(0) || "U"}
                         </AvatarFallback>
@@ -123,18 +123,18 @@ export function Navbar() {
                       </div>
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem>
+                    <DropdownMenuItem data-testid="menu-item-profile">
                       <User className="mr-2 h-4 w-4" />
                       <span>Profil</span>
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => logout()}>
+                    <DropdownMenuItem onClick={() => logout()} data-testid="button-logout">
                       <LogOut className="mr-2 h-4 w-4" />
                       <span>Chiqish</span>
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               ) : (
-                <Button asChild className="hidden sm:flex rounded-full bg-primary hover:bg-primary/90 shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-all duration-300">
+                <Button asChild className="rounded-full bg-primary hover:bg-primary/90 shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-all duration-300" data-testid="button-login">
                   <a href="/api/login">
                     Kirish
                   </a>
