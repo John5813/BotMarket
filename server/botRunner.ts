@@ -49,61 +49,17 @@ export function startEdufailBot(instanceId: number, token: string, adminTelegram
       const userId = msg.from?.id;
       const text = msg.text;
       const isAdmin = userId?.toString() === adminId;
-
-      // Registration Flow: Phone
-      if (msg.contact && data.registrationState.get(chatId) === 'phone') {
-        const customer = data.customerData.get(chatId.toString()) || {};
-        customer.phone = msg.contact.phone_number;
-        data.customerData.set(chatId.toString(), customer);
-        data.registrationState.set(chatId, 'name');
-        await bot.sendMessage(chatId, "Rahmat! Endi ismingizni kiriting:", {
-          reply_markup: { remove_keyboard: true }
-        });
-        return;
-      }
+      const userName = msg.from?.first_name || "Foydalanuvchi";
 
       if (!text) return;
 
-      // Handle Start / Registration
-      if (text === '/start' && !isAdmin) {
-        const existing = data.customerData.get(chatId.toString());
-        if (existing?.phone && existing?.name && existing?.province) {
-          await bot.sendMessage(chatId, `Xush kelibsiz, ${existing.name}! Sizga qanday yordam bera olaman?`);
-          return;
+      // Handle Start
+      if (text === '/start') {
+        if (isAdmin) {
+          await bot.sendMessage(chatId, `Salom, Admin! /admin buyrug'i bilan admin panelga kiring yoki oddiy xabar yozing.`);
+        } else {
+          await bot.sendMessage(chatId, `Salom, ${userName}! Men AI yordamchiman. Sizga qanday yordam bera olaman?`);
         }
-
-        data.registrationState.set(chatId, 'phone');
-        await bot.sendMessage(chatId, "Xush kelibsiz! Botdan foydalanish uchun ro'yxatdan o'ting.\nTelefon raqamingizni yuboring:", {
-          reply_markup: {
-            keyboard: [[{ text: "Telefon raqamni yuborish", request_contact: true }]],
-            resize_keyboard: true,
-            one_time_keyboard: true
-          }
-        });
-        return;
-      }
-
-      // Registration Flow: Name
-      if (data.registrationState.get(chatId) === 'name' && !isAdmin) {
-        const customer = data.customerData.get(chatId.toString()) || {};
-        customer.name = text;
-        data.customerData.set(chatId.toString(), customer);
-        data.registrationState.set(chatId, 'province');
-
-        const inline_keyboard = [];
-        for (let i = 0; i < UZBEKISTAN_PROVINCES.length; i += 2) {
-          const row = [
-            { text: UZBEKISTAN_PROVINCES[i], callback_data: `prov_${UZBEKISTAN_PROVINCES[i]}` }
-          ];
-          if (UZBEKISTAN_PROVINCES[i+1]) {
-            row.push({ text: UZBEKISTAN_PROVINCES[i+1], callback_data: `prov_${UZBEKISTAN_PROVINCES[i+1]}` });
-          }
-          inline_keyboard.push(row);
-        }
-
-        await bot.sendMessage(chatId, "Qaysi viloyatdansiz?", {
-          reply_markup: { inline_keyboard }
-        });
         return;
       }
 
@@ -114,157 +70,85 @@ export function startEdufailBot(instanceId: number, token: string, adminTelegram
           const opts = {
             reply_markup: {
               keyboard: [
-                [{ text: "Ma'lumot kiritish" }, { text: "Mijozlar tahlili" }],
-                [{ text: "Foydalanuvchi rejimi" }]
+                [{ text: "Ma'lumot kiritish" }, { text: "Suhbatlar" }],
+                [{ text: "Oddiy rejim" }]
               ],
               resize_keyboard: true
             }
           };
-          await bot.sendMessage(chatId, "Admin panelga xush kelibsiz.", opts);
+          await bot.sendMessage(chatId, "Admin panel. Biznes ma'lumotini kiriting yoki suhbatlarni ko'ring.", opts);
         } else {
-          await bot.sendMessage(chatId, "Kechirasiz, sizda adminlik huquqi yo'q.");
+          await bot.sendMessage(chatId, "Sizda adminlik huquqi yo'q.");
         }
         return;
       }
 
-      if (text === "Foydalanuvchi rejimi" && isAdmin) {
+      if (text === "Oddiy rejim" && isAdmin) {
         adminModes.set(chatId, false);
         awaitingBusinessInfo.delete(chatId);
-        await bot.sendMessage(chatId, "Foydalanuvchi rejimiga qaytdingiz.", {
-          reply_markup: { remove_keyboard: true }
-        });
+        await bot.sendMessage(chatId, "Oddiy rejimga qaytdingiz.", { reply_markup: { remove_keyboard: true } });
         return;
       }
 
-      // Admin Customer Analytics
-      if (text === "Mijozlar tahlili" && isAdmin) {
-        const allData = Array.from(data.customerData.values());
-        if (allData.length === 0) {
-          await bot.sendMessage(chatId, "Hozircha mijozlar haqida ma'lumot yo'q.");
-          return;
-        }
-
-        try {
-          const response = await openai.chat.completions.create({
-            model: "gpt-4o",
-            messages: [{ 
-              role: "user", 
-              content: `Mijozlar ro'yxati asosida qisqa (3-4 ta punkt) tahlil bering. Faqat eng muhim muammolar va so'rovlarni yozing.\nRo'yxat: ${JSON.stringify(allData)}` 
-            }],
-          });
-          await bot.sendMessage(chatId, response.choices[0]?.message?.content || "Tahlil qilishda xatolik.");
-        } catch (e) {
-          await bot.sendMessage(chatId, "AI tahlilida xatolik yuz berdi.");
+      if (text === "Suhbatlar" && isAdmin) {
+        const allLogs = Array.from(data.chatLogs.entries());
+        if (allLogs.length === 0) {
+          await bot.sendMessage(chatId, "Hozircha suhbatlar yo'q.");
+        } else {
+          let summary = `Jami ${allLogs.length} ta foydalanuvchi suhbatlashgan.`;
+          await bot.sendMessage(chatId, summary);
         }
         return;
       }
 
       if (text === "Ma'lumot kiritish" && isAdmin) {
-        const opts = {
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: "Yangi ma'lumot qo'shish", callback_data: 'update_info_append' }],
-              [{ text: "Borini almashtirish", callback_data: 'update_info_replace' }],
-            ]
-          }
-        };
-        const content = data.businessInfo || "Ma'lumot kiritilmagan.";
-        await bot.sendMessage(chatId, `Hozirgi ma'lumot:\n\n${content}\n\nQanday usulda ma'lumotni o'zgartirmoqchisiz?`, opts);
+        awaitingBusinessInfo.set(chatId, 'replace');
+        const content = data.businessInfo || "Hali kiritilmagan";
+        await bot.sendMessage(chatId, `Hozirgi ma'lumot:\n${content}\n\nYangi ma'lumotni yozing:`);
         return;
       }
 
       // Save Business Info
-      const currentAwaitingMode = awaitingBusinessInfo.get(chatId);
-      if (isAdmin && currentAwaitingMode) {
-        if (currentAwaitingMode === 'append') {
-          data.businessInfo = data.businessInfo ? `${data.businessInfo}\n${text}` : text;
-          await bot.sendMessage(chatId, "Ma'lumot qo'shildi.");
-        } else {
-          data.businessInfo = text;
-          await bot.sendMessage(chatId, "Ma'lumot yangilandi.");
-        }
+      if (isAdmin && awaitingBusinessInfo.get(chatId)) {
+        data.businessInfo = text;
         awaitingBusinessInfo.delete(chatId);
+        await bot.sendMessage(chatId, "Ma'lumot saqlandi!");
         return;
       }
 
-      // User Mode (AI Sales)
-      if (!isAdmin || !adminModes.get(chatId)) {
-        const customerData = data.customerData.get(chatId.toString());
+      // AI Chat for everyone
+      let logs = data.chatLogs.get(chatId.toString()) || [];
+      logs.push({ role: 'user', content: text });
+
+      const businessContext = data.businessInfo || "Umumiy AI yordamchi. Foydalanuvchilarga yordam bering.";
+      
+      try {
+        const response = await openai.chat.completions.create({
+          model: "gpt-4o",
+          messages: [
+            {
+              role: "system",
+              content: `Siz yordamchi botsiz. Kontekst: ${businessContext}
+Foydalanuvchi ismi: ${userName}. Qisqa va aniq javob bering (2-3 jumla).`
+            },
+            ...logs.slice(-10).map(log => ({
+              role: log.role as "user" | "assistant",
+              content: log.content
+            })),
+          ],
+        });
+
+        const reply = response.choices[0]?.message?.content || "Xatolik yuz berdi.";
+        logs.push({ role: 'assistant', content: reply });
+        data.chatLogs.set(chatId.toString(), logs);
         
-        if (!customerData?.phone || !customerData?.name || !customerData?.province) {
-          await bot.sendMessage(chatId, "Iltimos, avval ro'yxatdan o'ting. /start buyrug'ini bosing.");
-          return;
-        }
-
-        if (!data.businessInfo) {
-          await bot.sendMessage(chatId, "Hozircha men hech kimga xizmat qilmayapman. Iltimos, keyinroq urinib ko'ring.");
-          return;
-        }
-
-        // Get or create chat logs for this user
-        let logs = data.chatLogs.get(chatId.toString()) || [];
-        logs.push({ role: 'user', content: text });
-        
-        try {
-          const response = await openai.chat.completions.create({
-            model: "gpt-4o",
-            messages: [
-              {
-                role: "system",
-                content: `Siz professional sotuvchisiz. Faqat ushbu biznes doirasida qisqa va aniq gapiring: "${data.businessInfo}".
-                Mijoz ma'lumotlari: Ismi: ${customerData?.name}, Viloyat: ${customerData?.province}.
-                Vazifangiz: Mijozga yordam berish va uni nima qiynayotganini aniqlash.
-                Mijozga doimo ismini qo'shib, xushmuomalalik bilan murojaat qiling.
-                Har doim qisqa javob bering (maksimal 2-3 jumla).`
-              },
-              ...logs.slice(-20).map(log => ({
-                role: log.role as "user" | "assistant",
-                content: log.content
-              })),
-            ],
-          });
-
-          const reply = response.choices[0]?.message?.content || "Xatolik yuz berdi.";
-          logs.push({ role: 'assistant', content: reply });
-          data.chatLogs.set(chatId.toString(), logs);
-          
-          await bot.sendMessage(chatId, reply);
-        } catch (error) {
-          console.error("AI Error:", error);
-          await bot.sendMessage(chatId, "Xatolik yuz berdi.");
-        }
+        await bot.sendMessage(chatId, reply);
+      } catch (error) {
+        console.error("AI Error:", error);
+        await bot.sendMessage(chatId, "Xatolik yuz berdi. Keyinroq urinib ko'ring.");
       }
     });
 
-    bot.on('callback_query', async (query) => {
-      const chatId = query.message!.chat.id;
-      const callbackData = query.data || "";
-
-      if (callbackData === 'update_info_append') {
-        await bot.answerCallbackQuery(query.id);
-        awaitingBusinessInfo.set(chatId, 'append');
-        await bot.sendMessage(chatId, "Iltimos, qo'shiladigan yangi ma'lumotni yuboring:");
-        return;
-      }
-
-      if (callbackData === 'update_info_replace') {
-        await bot.answerCallbackQuery(query.id);
-        awaitingBusinessInfo.set(chatId, 'replace');
-        await bot.sendMessage(chatId, "Iltimos, butunlay yangi ma'lumotni yuboring:");
-        return;
-      }
-
-      if (callbackData.startsWith('prov_')) {
-        const province = callbackData.replace('prov_', '');
-        const customer = data.customerData.get(chatId.toString()) || {};
-        customer.province = province;
-        data.customerData.set(chatId.toString(), customer);
-        data.registrationState.delete(chatId);
-        
-        await bot.answerCallbackQuery(query.id);
-        await bot.sendMessage(chatId, `Rahmat, ${customer.name}! Siz ${province}dansiz. Endi menga savollaringizni berishingiz mumkin.`);
-      }
-    });
 
     bot.on('polling_error', (err) => {
       console.error(`Bot ${instanceId} polling error:`, err.message);
