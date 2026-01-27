@@ -18,9 +18,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Menu, LogOut, User, Send, MoreVertical, HelpCircle, Settings } from "lucide-react";
+import { Menu, LogOut, User, Send, MoreVertical, HelpCircle, Settings, X, Home, Grid, BookOpen } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 export function Navbar() {
@@ -29,6 +36,7 @@ export function Navbar() {
   const { toast } = useToast();
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
   const [password, setPassword] = useState("");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const handleAdminAccess = () => {
     if (password === "Javlon58_13") {
@@ -141,11 +149,103 @@ export function Navbar() {
                 </Button>
               )}
 
-              {/* Mobile Menu Trigger (Placeholder for now) */}
-              <Button variant="ghost" size="icon" className="md:hidden">
-                <Menu className="h-5 w-5" />
-                <span className="sr-only">Toggle menu</span>
-              </Button>
+              {/* Mobile Menu */}
+              <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+                <SheetTrigger asChild>
+                  <Button variant="ghost" size="icon" className="md:hidden" data-testid="button-mobile-menu">
+                    <Menu className="h-5 w-5" />
+                    <span className="sr-only">Menyu</span>
+                  </Button>
+                </SheetTrigger>
+                <SheetContent side="right" className="w-[300px] sm:w-[350px]">
+                  <SheetHeader className="border-b pb-4 mb-4">
+                    <SheetTitle className="flex items-center gap-2">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-tr from-primary to-blue-600 text-white">
+                        <Send className="h-4 w-4" />
+                      </div>
+                      TeleMarket
+                    </SheetTitle>
+                  </SheetHeader>
+                  
+                  <nav className="flex flex-col gap-1">
+                    <Link 
+                      href="/" 
+                      onClick={() => setMobileMenuOpen(false)}
+                      className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors hover-elevate ${location === "/" ? "bg-primary/10 text-primary" : "text-muted-foreground"}`}
+                    >
+                      <Home className="h-4 w-4" />
+                      Botlar
+                    </Link>
+                    <Link 
+                      href="#" 
+                      onClick={() => setMobileMenuOpen(false)}
+                      className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover-elevate"
+                    >
+                      <Grid className="h-4 w-4" />
+                      Kategoriyalar
+                    </Link>
+                    <Link 
+                      href="#" 
+                      onClick={() => setMobileMenuOpen(false)}
+                      className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover-elevate"
+                    >
+                      <BookOpen className="h-4 w-4" />
+                      Foydali
+                    </Link>
+                  </nav>
+
+                  <div className="mt-6 pt-6 border-t">
+                    {isAuthenticated ? (
+                      <div className="space-y-4">
+                        <div className="flex items-center gap-3 px-2">
+                          <Avatar className="h-10 w-10">
+                            <AvatarImage src={user?.profileImageUrl ?? undefined} alt={user?.firstName || "User"} />
+                            <AvatarFallback className="bg-primary/10 text-primary">
+                              {user?.firstName?.charAt(0) || "U"}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{user?.firstName} {user?.lastName}</p>
+                            <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+                          </div>
+                        </div>
+                        <Button 
+                          variant="outline" 
+                          className="w-full justify-start gap-2" 
+                          onClick={() => { logout(); setMobileMenuOpen(false); }}
+                          data-testid="button-mobile-logout"
+                        >
+                          <LogOut className="h-4 w-4" />
+                          Chiqish
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button 
+                        asChild 
+                        className="w-full rounded-lg bg-primary hover:bg-primary/90 shadow-lg shadow-primary/25"
+                        data-testid="button-mobile-login"
+                      >
+                        <a href="/api/login" onClick={() => setMobileMenuOpen(false)}>
+                          <User className="h-4 w-4 mr-2" />
+                          Kirish
+                        </a>
+                      </Button>
+                    )}
+                  </div>
+
+                  <div className="mt-4 pt-4 border-t">
+                    <p className="px-2 text-xs text-muted-foreground mb-2">Boshqa</p>
+                    <button 
+                      onClick={() => { setMobileMenuOpen(false); setShowPasswordDialog(true); }}
+                      className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover-elevate w-full"
+                      data-testid="button-mobile-admin"
+                    >
+                      <Settings className="h-4 w-4" />
+                      Admin Panel
+                    </button>
+                  </div>
+                </SheetContent>
+              </Sheet>
             </div>
           </div>
         </div>
