@@ -5,13 +5,14 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/Home";
+import Landing from "@/pages/Landing";
 import BotDetail from "@/pages/BotDetail";
 import Admin from "@/pages/Admin";
 import BotRunner from "@/pages/BotRunner";
 import { useAuth } from "@/hooks/use-auth";
 
 function Router() {
-  const { isLoading } = useAuth();
+  const { isLoading, isAuthenticated } = useAuth();
 
   if (isLoading) {
     return (
@@ -26,7 +27,9 @@ function Router() {
 
   return (
     <Switch>
-      <Route path="/" component={Home} />
+      <Route path="/">
+        {isAuthenticated ? <Home /> : <Landing />}
+      </Route>
       <Route path="/bot/:id" component={BotDetail} />
       <Route path="/bot/:id/run" component={BotRunner} />
       <Route path="/admin" component={Admin} />
