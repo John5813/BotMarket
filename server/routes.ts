@@ -53,42 +53,70 @@ export async function registerRoutes(
         return res.status(400).json({ message: "GitHub URL kerak" });
       }
 
-      // Parse GitHub URL to get raw content URL
-      const match = githubUrl.match(/github\.com\/([^\/]+)\/([^\/]+)/);
+      // Parse GitHub URL to get raw content URL - handle various formats
+      const cleanUrl = githubUrl.replace(/\/$/, '').replace(/\.git$/, '');
+      const match = cleanUrl.match(/github\.com\/([^\/]+)\/([^\/]+)/);
       if (!match) {
-        return res.status(400).json({ message: "Noto'g'ri GitHub URL formati" });
+        return res.status(400).json({ message: "Noto'g'ri GitHub URL formati. Masalan: https://github.com/username/repo" });
       }
 
       const [, owner, repo] = match;
-      const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/main/bot.json`;
+      console.log(`Trying to fetch bot.json from ${owner}/${repo}`);
 
-      // Fetch bot.json from repo
-      const response = await fetch(rawUrl);
-      if (!response.ok) {
-        // Try master branch
-        const masterUrl = `https://raw.githubusercontent.com/${owner}/${repo}/master/bot.json`;
-        const masterResponse = await fetch(masterUrl);
-        if (!masterResponse.ok) {
-          return res.status(400).json({ message: "bot.json fayli topilmadi" });
+      // Try different branches: main, master
+      const branches = ['main', 'master'];
+      let botData = null;
+      let foundBranch = null;
+
+      for (const branch of branches) {
+        const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/bot.json`;
+        console.log(`Trying: ${rawUrl}`);
+        try {
+          const response = await fetch(rawUrl);
+          if (response.ok) {
+            botData = await response.json();
+            foundBranch = branch;
+            console.log(`Found bot.json in ${branch} branch`);
+            break;
+          }
+        } catch (e) {
+          console.log(`Failed to fetch from ${branch}:`, e);
         }
-        const botData = await masterResponse.json();
-        const bot = await storage.createBot({
-          ...botData,
-          githubUrl,
-        });
-        return res.status(201).json(bot);
       }
 
-      const botData = await response.json();
+      if (!botData) {
+        return res.status(400).json({ 
+          message: `bot.json fayli topilmadi. Repository ildiz papkasida bot.json fayli bo'lishi kerak.`,
+          hint: `URL: https://github.com/${owner}/${repo} da bot.json fayli yo'q`
+        });
+      }
+
+      // Validate required fields
+      if (!botData.name || !botData.description) {
+        return res.status(400).json({ 
+          message: "bot.json da name va description maydonlari bo'lishi kerak" 
+        });
+      }
+
+      // Create bot with defaults for missing fields
       const bot = await storage.createBot({
-        ...botData,
-        githubUrl,
+        name: botData.name,
+        description: botData.description,
+        price: botData.price || "Bepul",
+        imageUrl: botData.imageUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=${botData.name}`,
+        demoUrl: botData.demoUrl || `https://t.me/${botData.username || 'bot'}`,
+        category: botData.category || "Boshqa",
+        features: botData.features || "",
+        username: botData.username || repo,
+        githubUrl: cleanUrl,
+        pricingType: botData.pricingType || "monthly",
+        pricingTier: botData.pricingTier || "simple",
       });
       
       res.status(201).json(bot);
     } catch (err) {
       console.error("GitHub import error:", err);
-      res.status(500).json({ message: "GitHub dan yuklashda xatolik" });
+      res.status(500).json({ message: "GitHub dan yuklashda xatolik: " + (err as Error).message });
     }
   });
 
