@@ -44,7 +44,7 @@ export async function registerRoutes(
     }
   });
 
-  // GitHub import - fetch bot.json from repo
+  // GitHub import - fetch any repo and create bot
   app.post("/api/bots/import-github", async (req, res) => {
     try {
       const { githubUrl } = req.body;
@@ -53,7 +53,7 @@ export async function registerRoutes(
         return res.status(400).json({ message: "GitHub URL kerak" });
       }
 
-      // Parse GitHub URL to get raw content URL - handle various formats
+      // Parse GitHub URL - handle various formats
       const cleanUrl = githubUrl.replace(/\/$/, '').replace(/\.git$/, '');
       const match = cleanUrl.match(/github\.com\/([^\/]+)\/([^\/]+)/);
       if (!match) {
@@ -61,53 +61,86 @@ export async function registerRoutes(
       }
 
       const [, owner, repo] = match;
-      console.log(`Trying to fetch bot.json from ${owner}/${repo}`);
+      console.log(`Importing bot from ${owner}/${repo}`);
 
-      // Try different branches: main, master
+      // First try to get bot.json if it exists
       const branches = ['main', 'master'];
-      let botData = null;
-      let foundBranch = null;
+      let botData: any = null;
 
       for (const branch of branches) {
         const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/bot.json`;
-        console.log(`Trying: ${rawUrl}`);
         try {
           const response = await fetch(rawUrl);
           if (response.ok) {
             botData = await response.json();
-            foundBranch = branch;
             console.log(`Found bot.json in ${branch} branch`);
             break;
           }
         } catch (e) {
-          console.log(`Failed to fetch from ${branch}:`, e);
+          // Continue to next branch
         }
       }
 
+      // If no bot.json, fetch repo info from GitHub API
       if (!botData) {
-        return res.status(400).json({ 
-          message: `bot.json fayli topilmadi. Repository ildiz papkasida bot.json fayli bo'lishi kerak.`,
-          hint: `URL: https://github.com/${owner}/${repo} da bot.json fayli yo'q`
+        console.log("No bot.json found, fetching repo info from GitHub API");
+        const apiUrl = `https://api.github.com/repos/${owner}/${repo}`;
+        const repoResponse = await fetch(apiUrl, {
+          headers: {
+            'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': 'TeleMarket-Bot-Importer'
+          }
         });
-      }
 
-      // Validate required fields
-      if (!botData.name || !botData.description) {
-        return res.status(400).json({ 
-          message: "bot.json da name va description maydonlari bo'lishi kerak" 
-        });
+        if (!repoResponse.ok) {
+          return res.status(400).json({ 
+            message: `Repository topilmadi: ${owner}/${repo}` 
+          });
+        }
+
+        const repoInfo = await repoResponse.json();
+        
+        // Create bot data from repo info
+        botData = {
+          name: repoInfo.name.replace(/-/g, ' ').replace(/_/g, ' '),
+          description: repoInfo.description || `${repoInfo.name} - Telegram bot`,
+          category: "Boshqa",
+          username: repo.toLowerCase().replace(/[^a-z0-9]/g, ''),
+        };
+
+        // Try to get README for better description
+        for (const branch of branches) {
+          const readmeUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/README.md`;
+          try {
+            const readmeResponse = await fetch(readmeUrl);
+            if (readmeResponse.ok) {
+              const readme = await readmeResponse.text();
+              // Extract first paragraph as description (skip headers)
+              const lines = readme.split('\n').filter(line => 
+                line.trim() && !line.startsWith('#') && !line.startsWith('!')
+              );
+              if (lines.length > 0) {
+                botData.description = lines.slice(0, 3).join(' ').substring(0, 500);
+              }
+              break;
+            }
+          } catch (e) {
+            // Continue
+          }
+        }
       }
 
       // Create bot with defaults for missing fields
+      const botName = botData.name || repo;
       const bot = await storage.createBot({
-        name: botData.name,
-        description: botData.description,
+        name: botName,
+        description: botData.description || `${botName} - Telegram bot`,
         price: botData.price || "Bepul",
-        imageUrl: botData.imageUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=${botData.name}`,
-        demoUrl: botData.demoUrl || `https://t.me/${botData.username || 'bot'}`,
+        imageUrl: botData.imageUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=${botName}`,
+        demoUrl: botData.demoUrl || `https://github.com/${owner}/${repo}`,
         category: botData.category || "Boshqa",
         features: botData.features || "",
-        username: botData.username || repo,
+        username: botData.username || repo.toLowerCase(),
         githubUrl: cleanUrl,
         pricingType: botData.pricingType || "monthly",
         pricingTier: botData.pricingTier || "simple",
