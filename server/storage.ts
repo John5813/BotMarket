@@ -6,6 +6,7 @@ export interface IStorage {
   getBots(): Promise<Bot[]>;
   getBot(id: number): Promise<Bot | undefined>;
   createBot(bot: InsertBot): Promise<Bot>;
+  updateBot(id: number, data: Partial<InsertBot>): Promise<Bot | undefined>;
   createBotInstance(instance: InsertBotInstance): Promise<BotInstance>;
   getBotInstance(id: number): Promise<BotInstance | undefined>;
   updateBotInstanceStatus(id: number, status: string): Promise<void>;
@@ -24,6 +25,11 @@ export class DatabaseStorage implements IStorage {
 
   async createBot(insertBot: InsertBot): Promise<Bot> {
     const [bot] = await db.insert(bots).values(insertBot).returning();
+    return bot;
+  }
+
+  async updateBot(id: number, data: Partial<InsertBot>): Promise<Bot | undefined> {
+    const [bot] = await db.update(bots).set(data).where(eq(bots.id, id)).returning();
     return bot;
   }
 

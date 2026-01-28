@@ -17,6 +17,14 @@ export const bots = pgTable("bots", {
   username: text("username").notNull(),
   isRunnable: boolean("is_runnable").default(false),
   botType: text("bot_type").default("demo"),
+  githubUrl: text("github_url"),
+  pricingType: text("pricing_type").default("monthly"),
+  pricingTier: text("pricing_tier").default("simple"),
+  monthlyPrice: integer("monthly_price").default(30000),
+  tokenPrice: integer("token_price").default(5000),
+  trialDays: integer("trial_days").default(3),
+  minPrepayment: integer("min_prepayment").default(50000),
+  trialPrepayment: integer("trial_prepayment").default(10000),
 });
 
 export const botInstances = pgTable("bot_instances", {
