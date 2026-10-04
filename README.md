@@ -61,6 +61,7 @@ npm run dev                   # http://localhost:5000
 | O'zgaruvchi | Qayerdan olinadi |
 |---|---|
 | `FAL_KEY` | [fal.ai/dashboard/keys](https://fal.ai/dashboard/keys) → "Add key". Hisobni oldindan to'ldiring (Billing) |
+| `OPENROUTER_API_KEY` | [openrouter.ai/keys](https://openrouter.ai/keys) — admin "AI tahlil" uchun (bitta tahlil ~1–5 cent). `OPENROUTER_MODEL` bilan model tanlanadi |
 | `PAYME_MERCHANT_ID`, `PAYME_KEY` | [business.payme.uz](https://business.payme.uz) → kassa → Developers. Avval **test kalit** bilan, keyin production |
 | `PAYME_IKPU_CODE`, `PAYME_PACKAGE_CODE` | Fiskal chek uchun MXIK kodi: [tasnif.soliq.uz](https://tasnif.soliq.uz) |
 | `CLICK_SERVICE_ID`, `CLICK_MERCHANT_ID`, `CLICK_SECRET_KEY` | [merchant.click.uz](https://merchant.click.uz) → servis sozlamalari |
@@ -157,17 +158,24 @@ Sessiya cookie'si production'da faqat HTTPS orqali ishlaydi — SSL sertifikat s
 
 ## 5. Yangi shablon qo'shish
 
-1. fal.ai Playground'da modelni qo'lda sinang, eng yaxshi prompt va parametrlarni toping
-2. Admin → **Shablonlar → Yangi shablon**
-3. Turini tanlang — qadamlar avtomatik to'ldiriladi:
+1. Admin → **Shablonlar → Yangi shablon** — avval video yoki rasm so'raladi
+2. **🤖 AI tahlil qilsin**: AI kadrlarni ko'rib personajlarni ramka bilan ko'rsatadi, qaysi personaj almashtirilishini tanlaysiz, nom/tavsif/promptlar avtomatik yoziladi. Yoki **Qo'lda kiritaman**
+3. fal.ai Playground'da natijani solishtirib, promptlarni kerak bo'lsa tahrirlang
+4. Turini o'zgartirish mumkin — qadamlar avtomatik to'ldiriladi:
    - **Qahramon almashtirish** (raqs, hayvon): `fal-ai/wan/v2.2-14b/animate/replace` — asl videoni yuklang
    - **Effekt**: `fal-ai/nano-banana/edit` → `fal-ai/kling-video/v2.5-turbo/pro/image-to-video` — promptlarni yozing
    - **Fotosessiya**: bir nechta `nano-banana/edit` qadam, har biri "natija mijozga beriladi"
    - **Maxsus**: istalgan fal.ai modeli (endpoint nomi + JSON parametrlar)
-4. Namuna video yuklang → Saqlash → **Sinab ko'rish** (o'z rasmingiz bilan, kreditsiz)
-5. Natija yaxshi bo'lsa — "Faol" ni yoqing
+5. Saqlash → **Sinab ko'rish** (o'z rasmingiz bilan, kreditsiz)
+6. Natija yaxshi bo'lsa — "Faol" ni yoqing
 
-O'rinbosarlar: `{{user_image}}`, `{{template_video}}`, `{{prev}}`, `{{step_0}}`, `{{step_1}}`...
+### Ko'p personajli video (2–4 kishi)
+- AI tahlilda videoda 2+ odam topilsa **"Ko'p personajli"** turi tavsiya qilinadi — almashtiriladigan personajlarni tartib bilan belgilaysiz (1-tanlangan → mijozning 1-rasmi)
+- Mijoz sahifasida har bir personaj uchun alohida rasm joyi chiqadi ("Kuyov", "Kelin" ...) — nomlarni "Mijozdan so'raladigan rasmlar" bo'limida o'zgartirasiz
+- Model: **Kling O1 Video Edit** (`fal-ai/kling-video/o1/video-to-video/edit`) — promptda `@Image1`, `@Image2`; asl video **MP4/MOV, 3–10 soniya, 720p+**, ko'pi bilan 4 ta rasm
+- Tannarx yuqoriroq (~$1/video) — narxni 4+ kredit qiling. Endpoint nomi va parametrlarini fal.ai sahifasida tekshirib oling
+
+O'rinbosarlar: `{{user_image}}` (= `{{user_image_1}}`), `{{user_image_2}}`..., `{{template_video}}`, `{{template_image}}`, `{{prev}}`, `{{step_0}}`, `{{step_1}}`...
 
 ---
 

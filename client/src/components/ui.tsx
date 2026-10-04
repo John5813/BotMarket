@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from "react";
 import clsx from "clsx";
 import { LoaderCircle, X, CircleCheck, TriangleAlert } from "lucide-react";
 
@@ -135,5 +135,31 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         ))}
       </div>
     </ToastCtx.Provider>
+  );
+}
+
+/**
+ * Raqam maydoni: bo'sh qoldirish mumkin, "0123" kabi yopishib qolmaydi,
+ * telefonda raqamli klaviatura ochiladi. Bo'sh bo'lsa qiymat 0 hisoblanadi.
+ */
+export function NumInput({ value, onChange, decimal, className, ...rest }:
+  Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "type"> & { value: number | null | undefined; onChange: (v: number) => void; decimal?: boolean }) {
+  const [text, setText] = useState(value == null ? "" : String(value));
+  useEffect(() => {
+    const cur = text === "" || text === "-" || text === "." ? 0 : Number(text);
+    if ((value ?? 0) !== cur) setText(value == null ? "" : String(value));
+  }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <input {...rest} type="text" inputMode={decimal ? "decimal" : "numeric"} autoComplete="off"
+      className={clsx("input", className)} value={text}
+      onFocus={(e) => { if (text === "0") e.currentTarget.select(); rest.onFocus?.(e); }}
+      onChange={(e) => {
+        const t = e.target.value.replace(",", ".").replace(/\s/g, "");
+        if (!(decimal ? /^-?\d*\.?\d*$/ : /^-?\d*$/).test(t)) return;
+        const cleaned = t.replace(/^(-?)0+(?=\d)/, "$1");   // "0123" → "123"
+        setText(cleaned);
+        const n = Number(cleaned);
+        onChange(cleaned === "" || cleaned === "-" || cleaned === "." || !Number.isFinite(n) ? 0 : n);
+      }} />
   );
 }

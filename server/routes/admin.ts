@@ -8,10 +8,11 @@ import {
 import { requireAdmin, publicUser } from "../auth";
 import { consumeCredits, getBalance, grantCredits, InsufficientCreditsError } from "../credits";
 import { absPath, deleteFile, extFromMime, fileMime, IMAGE_MIMES, publicUrl, saveBuffer, VIDEO_MIMES } from "../files";
-import { estimateCostUsd, validateSteps } from "../ai/pipeline";
+import { estimateCostUsd, maxUserImageIndex, usesTemplateVideo, validateSteps } from "../ai/pipeline";
 import { getSettings, updateSettings, DEFAULT_SETTINGS } from "../settings";
 import { generationDto, HttpError, parse, slugify, upload } from "./helpers";
 import { ai } from "../ai/provider";
+import { analyzeTemplateMedia } from "../ai/analyze";
 
 export const adminRouter = Router();
 adminRouter.use(requireAdmin);
@@ -101,6 +102,7 @@ function adminTemplateDto(t: Template) {
     ...t,
     previewUrl: publicUrl(t.previewPath), posterUrl: publicUrl(t.posterPath),
     sourceVideoUrl: t.sourceVideoPath ? `/api/admin/templates/${t.id}/source` : null,
+    sourceIsVideo: !!t.sourceVideoPath && /\.(mp4|webm|mov)$/i.test(t.sourceVideoPath),
     estimatedCostUsd: estimateCostUsd(t.steps),
   };
 }
@@ -110,7 +112,11 @@ const templateSchema = z.object({
   slug: z.string().trim().max(60).optional().default(""),
   description: z.string().max(500).default(""),
   categoryId: z.coerce.number().int().positive().nullable().optional(),
-  kind: z.enum(["character_replace", "effect", "photoshoot", "custom"]),
+  kind: z.enum(["character_replace", "multi_character", "effect", "photoshoot", "custom"]),
+  inputSlots: z.array(z.object({
+    label: z.string().trim().min(1, "Rasm joyiga nom bering").max(40),
+    hint: z.string().trim().max(120).optional(),
+  })).max(6, "Ko'pi bilan 6 ta rasm joyi").default([]),
   creditCost: z.coerce.number().int().min(0).max(100),
   allowAnimals: z.boolean().default(false),
   inputHint: z.string().max(300).default(""),
@@ -132,6 +138,11 @@ async function saveTemplate(req: any, existing?: Template) {
   const b = parse(templateSchema, raw);
   const steps = validateSteps(b.steps);
   if (!steps.ok) throw new HttpError(400, steps.error);
+  const needImages = maxUserImageIndex(steps.steps);
+  const slotCount = Math.max(1, b.inputSlots.length);
+  if (needImages > slotCount) {
+    throw new HttpError(400, `Retsept {{user_image_${needImages}}} ishlatadi, lekin faqat ${slotCount} ta rasm joyi bor — "Mijozdan so'raladigan rasmlar" bo'limiga qo'shing`);
+  }
 
   const files = (req.files || {}) as Record<string, Express.Multer.File[]>;
   const paths: Partial<Pick<Template, "previewPath" | "posterPath" | "sourceVideoPath">> = {};
@@ -147,13 +158,12 @@ async function saveTemplate(req: any, existing?: Template) {
   }
   const src = files.sourceVideo?.[0];
   if (src) {
-    if (!VIDEO_MIMES.includes(fileMime(src))) throw new HttpError(400, "Asl video MP4/WEBM/MOV bo'lishi kerak");
+    if (![...VIDEO_MIMES, ...IMAGE_MIMES].includes(fileMime(src))) throw new HttpError(400, "Asl media video (MP4/WEBM/MOV) yoki rasm (JPG/PNG/WEBP) bo'lishi kerak");
     paths.sourceVideoPath = await saveBuffer("private/templates", src.buffer, extFromMime(fileMime(src), "mp4"));
   }
 
-  const usesVideo = JSON.stringify(steps.steps).includes("{{template_video}}");
-  if (usesVideo && !paths.sourceVideoPath && !existing?.sourceVideoPath) {
-    throw new HttpError(400, "Bu retsept {{template_video}} ishlatadi — asl videoni yuklang");
+  if (usesTemplateVideo(steps.steps) && !paths.sourceVideoPath && !existing?.sourceVideoPath) {
+    throw new HttpError(400, "Bu retsept shablonning asl mediasini ishlatadi — asl video yoki rasmni yuklang");
   }
   if (b.isActive && !paths.previewPath && !existing?.previewPath) {
     throw new HttpError(400, "Faol qilishdan oldin namuna video yoki rasm yuklang");
@@ -167,7 +177,7 @@ async function saveTemplate(req: any, existing?: Template) {
     title: b.title, slug, description: b.description, categoryId: b.categoryId ?? null, kind: b.kind,
     creditCost: b.creditCost, allowAnimals: b.allowAnimals, inputHint: b.inputHint,
     isActive: b.isActive, isFeatured: b.isFeatured, isNew: b.isNew, sortOrder: b.sortOrder,
-    steps: steps.steps, updatedAt: new Date(), ...paths,
+    steps: steps.steps, inputSlots: b.inputSlots.length > 1 ? b.inputSlots : b.inputSlots.slice(0, 1), updatedAt: new Date(), ...paths,
     ...(paths.sourceVideoPath ? { sourceFalUrl: null, sourceFalUploadedAt: null } : {}),
   };
   if (existing) {
@@ -337,4 +347,20 @@ adminRouter.get("/settings", async (_req, res) => {
 });
 adminRouter.put("/settings", async (req, res) => {
   res.json({ values: await updateSettings(req.body || {}) });
+});
+
+// ---------------------------------------------------------------------------
+// AI tahlil: shablon kadrlarini ko'rib personaj, sahna va promptlarni taklif qiladi
+// ---------------------------------------------------------------------------
+adminRouter.post("/analyze", async (req, res) => {
+  const b = parse(z.object({
+    mediaType: z.enum(["video", "image"]),
+    frames: z.array(z.string().regex(/^data:image\/(jpeg|png|webp);base64,/, "Kadr formati noto'g'ri").max(2_000_000, "Kadr juda katta"))
+      .min(1, "Kamida bitta kadr kerak").max(6, "Ko'pi bilan 6 ta kadr"),
+  }), req.body);
+  try {
+    res.json(await analyzeTemplateMedia(b.frames, b.mediaType));
+  } catch (e) {
+    throw new HttpError(502, (e as Error).message);
+  }
 });

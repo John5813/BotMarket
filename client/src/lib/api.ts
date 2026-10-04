@@ -37,6 +37,7 @@ export type TemplateCard = {
   id: number; slug: string; title: string; description: string; categoryId: number | null; kind: string;
   previewUrl: string | null; previewIsVideo: boolean; posterUrl: string | null; creditCost: number;
   allowAnimals: boolean; inputHint: string; isFeatured: boolean; isNew: boolean; usageCount: number;
+  inputSlots?: { label: string; hint?: string }[];
 };
 export type Catalog = { featured: TemplateCard[]; categories: { id: number; title: string; slug: string; emoji: string; templates: TemplateCard[] }[] };
 export type GenerationItem = {

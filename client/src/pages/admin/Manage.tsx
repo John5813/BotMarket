@@ -3,7 +3,7 @@ import { Link, useSearch } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, Pencil, Trash2, Search, Zap, Shield, Ban, Eye, RefreshCw } from "lucide-react";
 import { api, formatDate, formatPhone, formatUzs, queryClient, type GenerationItem, type Order, type Plan } from "@/lib/api";
-import { Badge, Button, Card, Empty, Modal, PageLoader, StatusBadge, Toggle, clsx, useToast } from "@/components/ui";
+import { Badge, Button, Card, Empty, Modal, NumInput, PageLoader, StatusBadge, Toggle, clsx, useToast } from "@/components/ui";
 import { PageHead } from "./AdminLayout";
 
 function useSave(keys: string[]) {
@@ -67,7 +67,7 @@ export function AdminCategories() {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div><label className="label">Slug</label><input className="input" value={edit.slug || ""} placeholder="avtomatik" onChange={(e) => setEdit({ ...edit, slug: e.target.value })} /></div>
-            <div><label className="label">Tartib</label><input className="input" type="number" value={edit.sortOrder ?? 0} onChange={(e) => setEdit({ ...edit, sortOrder: Number(e.target.value) })} /></div>
+            <div><label className="label">Tartib</label><NumInput value={edit.sortOrder ?? 0} onChange={(n) => setEdit({ ...edit, sortOrder: n })} /></div>
           </div>
           <Toggle checked={edit.isActive ?? true} onChange={(v) => setEdit({ ...edit, isActive: v })} label="Faol" />
           <Button className="w-full" loading={busy} onClick={save}>Saqlash</Button>
@@ -120,13 +120,13 @@ export function AdminPlans() {
           <div><label className="label">Nomi</label><input className="input" value={edit.title || ""} onChange={(e) => setEdit({ ...edit, title: e.target.value })} /></div>
           <div><label className="label">Tavsif</label><input className="input" value={edit.description || ""} onChange={(e) => setEdit({ ...edit, description: e.target.value })} /></div>
           <div className="grid grid-cols-3 gap-3">
-            <div><label className="label">Kredit</label><input className="input" type="number" value={edit.credits ?? ""} onChange={(e) => setEdit({ ...edit, credits: Number(e.target.value) })} /></div>
-            <div><label className="label">Narx (so'm)</label><input className="input" type="number" value={edit.priceUzs ?? ""} onChange={(e) => setEdit({ ...edit, priceUzs: Number(e.target.value) })} /></div>
-            <div><label className="label">Muddat (kun)</label><input className="input" type="number" value={edit.validityDays ?? ""} onChange={(e) => setEdit({ ...edit, validityDays: Number(e.target.value) })} /></div>
+            <div><label className="label">Kredit</label><NumInput value={edit.credits} onChange={(n) => setEdit({ ...edit, credits: n })} /></div>
+            <div><label className="label">Narx (so'm)</label><NumInput value={edit.priceUzs} onChange={(n) => setEdit({ ...edit, priceUzs: n })} /></div>
+            <div><label className="label">Muddat (kun)</label><NumInput value={edit.validityDays} onChange={(n) => setEdit({ ...edit, validityDays: n })} /></div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div><label className="label">Belgi (badge)</label><input className="input" value={edit.badge || ""} placeholder="Ommabop" onChange={(e) => setEdit({ ...edit, badge: e.target.value })} /></div>
-            <div><label className="label">Tartib</label><input className="input" type="number" value={edit.sortOrder ?? 0} onChange={(e) => setEdit({ ...edit, sortOrder: Number(e.target.value) })} /></div>
+            <div><label className="label">Tartib</label><NumInput value={edit.sortOrder ?? 0} onChange={(n) => setEdit({ ...edit, sortOrder: n })} /></div>
           </div>
           <Toggle checked={edit.isActive ?? true} onChange={(v) => setEdit({ ...edit, isActive: v })} label="Faol" />
           <Button className="w-full" loading={busy} onClick={save}>Saqlash</Button>
@@ -185,8 +185,8 @@ export function AdminUsers() {
         {credit && <div className="space-y-4">
           <p className="text-sm text-white/60">Hozirgi balans: <b className="text-white">{credit.user.balance}</b>. Ayirish uchun manfiy son kiriting (masalan: -3).</p>
           <div className="grid grid-cols-2 gap-3">
-            <div><label className="label">Miqdor</label><input className="input" type="number" value={credit.delta} onChange={(e) => setCredit({ ...credit, delta: e.target.value })} /></div>
-            <div><label className="label">Muddat (kun)</label><input className="input" type="number" value={credit.days} onChange={(e) => setCredit({ ...credit, days: e.target.value })} /></div>
+            <div><label className="label">Miqdor</label><input className="input" inputMode="numeric" value={credit.delta} onChange={(e) => setCredit({ ...credit, delta: e.target.value })} /></div>
+            <div><label className="label">Muddat (kun)</label><input className="input" inputMode="numeric" value={credit.days} onChange={(e) => setCredit({ ...credit, days: e.target.value })} /></div>
           </div>
           <div><label className="label">Izoh</label><input className="input" placeholder="Masalan: shikoyat uchun kompensatsiya" value={credit.note} onChange={(e) => setCredit({ ...credit, note: e.target.value })} /></div>
           <Button className="w-full" loading={busy} onClick={async () => {
@@ -311,7 +311,6 @@ export function AdminSettings() {
   const { run, busy } = useSave(["/api/admin/settings", "/api/config"]);
   useEffect(() => { if (data) setV(data.values); }, [data]);
   if (isLoading || !v) return <PageLoader />;
-  const num = (k: keyof SettingsValues) => (e: React.ChangeEvent<HTMLInputElement>) => setV({ ...v, [k]: Number(e.target.value) });
   const str = (k: keyof SettingsValues) => (e: React.ChangeEvent<HTMLInputElement>) => setV({ ...v, [k]: e.target.value });
 
   return (
@@ -324,11 +323,11 @@ export function AdminSettings() {
         </div>
         <div><label className="label">Shior</label><input className="input" value={v.tagline} onChange={str("tagline")} /></div>
         <div className="grid gap-4 sm:grid-cols-2">
-          <div><label className="label">Ro'yxatdan o'tish bonusi (kredit)</label><input className="input" type="number" min={0} value={v.signupBonusCredits} onChange={num("signupBonusCredits")} /></div>
-          <div><label className="label">Bonus muddati (kun)</label><input className="input" type="number" min={1} value={v.signupBonusDays} onChange={num("signupBonusDays")} /></div>
-          <div><label className="label">Mijoz rasmlarini saqlash (soat)</label><input className="input" type="number" min={1} value={v.inputRetentionHours} onChange={num("inputRetentionHours")} /></div>
-          <div><label className="label">Generatsiya vaqt chegarasi (daqiqa)</label><input className="input" type="number" min={2} value={v.generationTimeoutMinutes} onChange={num("generationTimeoutMinutes")} /></div>
-          <div><label className="label">Dollar kursi (so'm)</label><input className="input" type="number" min={1} value={v.usdToUzs} onChange={num("usdToUzs")} /></div>
+          <div><label className="label">Ro'yxatdan o'tish bonusi (kredit)</label><NumInput value={v.signupBonusCredits} onChange={(n) => setV({ ...v, signupBonusCredits: n })} /></div>
+          <div><label className="label">Bonus muddati (kun)</label><NumInput value={v.signupBonusDays} onChange={(n) => setV({ ...v, signupBonusDays: n })} /></div>
+          <div><label className="label">Mijoz rasmlarini saqlash (soat)</label><NumInput value={v.inputRetentionHours} onChange={(n) => setV({ ...v, inputRetentionHours: n })} /></div>
+          <div><label className="label">Generatsiya vaqt chegarasi (daqiqa)</label><NumInput value={v.generationTimeoutMinutes} onChange={(n) => setV({ ...v, generationTimeoutMinutes: n })} /></div>
+          <div><label className="label">Dollar kursi (so'm)</label><NumInput value={v.usdToUzs} onChange={(n) => setV({ ...v, usdToUzs: n })} /></div>
         </div>
         <p className="text-xs text-white/40">Bepul bonus kredit sizga real pul turadi (har bir video ~$0.35–0.60). Firibgarlikni kamaytirish uchun bonusni 1 tadan oshirmang.</p>
       </Card>

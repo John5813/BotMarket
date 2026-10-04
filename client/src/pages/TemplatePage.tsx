@@ -5,7 +5,7 @@ import { ChevronLeft, ImagePlus, Zap, PawPrint, Sun, ScanFace, Image as ImageIco
 import { api, ApiError, queryClient, type TemplateCard } from "@/lib/api";
 import { useMe } from "@/lib/hooks";
 import { TemplatePreview } from "@/components/TemplateCard";
-import { Button, Empty, PageLoader, useToast } from "@/components/ui";
+import { Button, Empty, PageLoader, clsx, useToast } from "@/components/ui";
 
 const MAX_MB = 15;
 
@@ -25,41 +25,75 @@ function checkImage(file: File): Promise<string | null> {
   });
 }
 
+/** Bitta rasm yuklash joyi (ko'p personajli shablonlarda bir nechtasi) */
+function PhotoSlot({ label, hint, file, onChange, compact }: { label: string; hint?: string; file: File | null; onChange: (f: File | null) => void; compact?: boolean }) {
+  const toast = useToast();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [drag, setDrag] = useState(false);
+  const [preview, setPreview] = useState<string | null>(null);
+  useEffect(() => {
+    if (!file) { setPreview(null); return; }
+    const url = URL.createObjectURL(file);
+    setPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+
+  async function pick(f?: File | null) {
+    if (!f) return;
+    const err = await checkImage(f);
+    if (err) return toast(err, "error");
+    onChange(f);
+  }
+
+  return (
+    <div>
+      <div className="label">{label}</div>
+      {preview ? (
+        <div className="relative w-fit">
+          <img src={preview} alt={label} className={clsx("rounded-2xl border border-line object-contain", compact ? "max-h-48" : "max-h-72")} />
+          <button onClick={() => onChange(null)} className="absolute right-2 top-2 rounded-full bg-black/70 p-1.5 hover:bg-black" aria-label="Rasmni o'chirish"><X className="h-4 w-4" /></button>
+        </div>
+      ) : (
+        <button type="button" onClick={() => inputRef.current?.click()}
+          onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
+          onDrop={(e) => { e.preventDefault(); setDrag(false); pick(e.dataTransfer.files?.[0]); }}
+          className={clsx("flex w-full flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-6 text-center transition", compact ? "py-7" : "py-10", drag ? "border-brand bg-brand/10" : "border-line bg-card hover:border-white/30")}>
+          <ImagePlus className={clsx("text-brand-light", compact ? "h-8 w-8" : "h-10 w-10")} />
+          <div className="font-semibold">Rasm yuklash</div>
+          <div className="text-sm text-white/50">{hint || "Bosing yoki rasmni shu yerga tashlang · JPG, PNG, WEBP"}</div>
+        </button>
+      )}
+      <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => { pick(e.target.files?.[0]); e.target.value = ""; }} />
+    </div>
+  );
+}
+
 export function TemplatePage() {
   const { slug } = useParams<{ slug: string }>();
   const [, navigate] = useLocation();
   const toast = useToast();
   const { user, balance } = useMe();
   const { data: t, isLoading, error } = useQuery<TemplateCard>({ queryKey: [`/api/templates/${slug}`] });
-  const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
+  const [files, setFiles] = useState<(File | null)[]>([]);
   const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [drag, setDrag] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
 
   if (isLoading) return <PageLoader />;
   if (error || !t) return <Empty title="Shablon topilmadi" action={<Link href="/" className="text-brand-light">Bosh sahifaga</Link>} />;
 
-  async function pick(f?: File | null) {
-    if (!f) return;
-    const err = await checkImage(f);
-    if (err) return toast(err, "error");
-    if (preview) URL.revokeObjectURL(preview);
-    setFile(f);
-    setPreview(URL.createObjectURL(f));
-  }
+  const slots = t.inputSlots?.length ? t.inputSlots : [{ label: "Rasmingiz" }];
+  const multi = slots.length > 1;
+  const allPicked = slots.every((_, i) => files[i]);
 
   async function submit() {
     if (!user) return navigate(`/login?next=/t/${slug}`);
-    if (!file) return toast("Avval rasm yuklang", "error");
+    const missing = slots.findIndex((_, i) => !files[i]);
+    if (missing >= 0) return toast(`${slots[missing].label}: rasm yuklang`, "error");
     if (!consent) return toast("Rozilik belgisini qo'ying", "error");
     const form = new FormData();
     form.append("templateSlug", t!.slug);
     form.append("consent", "true");
-    form.append("photo", file);
+    slots.forEach((_, i) => form.append(i === 0 ? "photo" : `photo_${i + 1}`, files[i]!));
     setBusy(true);
     try {
       const r = await api<{ id: string }>("/api/generations", { form });
@@ -98,30 +132,20 @@ export function TemplatePage() {
           </div>
 
           <div className="mt-6">
-            <div className="label">Rasmingiz</div>
-            {preview ? (
-              <div className="relative w-fit">
-                <img src={preview} alt="Yuklangan rasm" className="max-h-72 rounded-2xl border border-line object-contain" />
-                <button onClick={() => { setFile(null); setPreview(null); }} className="absolute right-2 top-2 rounded-full bg-black/70 p-1.5 hover:bg-black" aria-label="Rasmni o'chirish"><X className="h-4 w-4" /></button>
-              </div>
-            ) : (
-              <button type="button" onClick={() => inputRef.current?.click()}
-                onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
-                onDrop={(e) => { e.preventDefault(); setDrag(false); pick(e.dataTransfer.files?.[0]); }}
-                className={`flex w-full flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-6 py-10 text-center transition ${drag ? "border-brand bg-brand/10" : "border-line bg-card hover:border-white/30"}`}>
-                <ImagePlus className="h-10 w-10 text-brand-light" />
-                <div className="font-semibold">Rasm yuklash</div>
-                <div className="text-sm text-white/50">Bosing yoki rasmni shu yerga tashlang · JPG, PNG, WEBP</div>
-              </button>
-            )}
-            <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => { pick(e.target.files?.[0]); e.target.value = ""; }} />
+            {multi && <p className="mb-3 rounded-xl bg-brand/10 px-4 py-2.5 text-sm text-white/80">Bu videoda {slots.length} ta personaj bor — har biri uchun alohida rasm yuklang.</p>}
+            <div className={multi ? "grid gap-3 sm:grid-cols-2" : ""}>
+              {slots.map((slot, i) => (
+                <PhotoSlot key={i} label={slot.label} hint={slot.hint} compact={multi} file={files[i] ?? null}
+                  onChange={(f) => setFiles((cur) => { const n = [...cur]; n[i] = f; return n; })} />
+              ))}
+            </div>
           </div>
 
           <div className="mt-4 grid gap-2 sm:grid-cols-3">
             {[
               [ScanFace, t.allowAnimals ? "Yuz (yoki hayvon) aniq va to'g'ri qaragan" : "Yuz aniq va to'g'ri qaragan"],
               [Sun, "Yorug' joyda, soyasiz"],
-              [ImageIcon, "Rasmda faqat bitta odam yoki hayvon"],
+              [ImageIcon, multi ? "Har bir rasmda faqat bitta odam" : "Rasmda faqat bitta odam yoki hayvon"],
             ].map(([Icon, text], k) => {
               const I = Icon as typeof Sun;
               return <div key={k} className="flex items-center gap-2 rounded-xl bg-card px-3 py-2.5 text-xs text-white/70 ring-1 ring-line"><I className="h-4 w-4 shrink-0 text-brand-light" />{text as string}</div>;
@@ -131,11 +155,11 @@ export function TemplatePage() {
 
           <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-2xl bg-card p-4 text-sm text-white/70 ring-1 ring-line">
             <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[#7c5cff]" />
-            <span>Rasmdagi shaxs — men o'zimman yoki uning roziligini olganman. Bolalar va boshqa odamlarni ruxsatsiz ishlatmayman. <Link href="/terms" className="text-brand-light underline">Foydalanish shartlari</Link></span>
+            <span>{multi ? "Rasmlardagi shaxslar — men o'zimman yoki ularning roziligini olganman." : "Rasmdagi shaxs — men o'zimman yoki uning roziligini olganman."} Bolalar va boshqa odamlarni ruxsatsiz ishlatmayman. <Link href="/terms" className="text-brand-light underline">Foydalanish shartlari</Link></span>
           </label>
 
           <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
-            <Button size="lg" loading={busy} onClick={submit} disabled={!!user && (!file || !consent)} className="w-full sm:w-auto">
+            <Button size="lg" loading={busy} onClick={submit} disabled={!!user && (!allPicked || !consent)} className="w-full sm:w-auto">
               {user ? `Yaratish · ${t.creditCost} kredit` : "Kirish va yaratish"}
             </Button>
             {user && !enough && (

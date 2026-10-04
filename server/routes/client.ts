@@ -18,34 +18,52 @@ clientRouter.use(["/generations", "/me", "/orders"], requireAuth);
 const createLimiter = rateLimit({ windowMs: 60_000, limit: 10, keyGenerator: (req) => String(req.user?.id),
   message: { message: "Juda tez-tez so'rov yuborilyapti. Bir daqiqa kuting." } });
 
-/** Yangi generatsiya: rasm yuklanadi, kredit yechiladi, navbatga qo'shiladi */
-clientRouter.post("/generations", createLimiter, upload.single("photo"), async (req, res) => {
+const MAX_SLOTS = 6;
+const photoFields = upload.fields([{ name: "photo", maxCount: 1 }, ...Array.from({ length: MAX_SLOTS - 1 }, (_, i) => ({ name: `photo_${i + 2}`, maxCount: 1 }))]);
+
+function checkPhoto(file: Express.Multer.File | undefined, label: string) {
+  if (!file) throw new HttpError(400, `${label}: rasm yuklang`);
+  const mime = fileMime(file);
+  if (!IMAGE_MIMES.includes(mime) || !looksLikeImage(file.buffer)) throw new HttpError(400, `${label}: faqat JPG, PNG yoki WEBP rasm yuklang`);
+  if (file.size > 15 * 1024 * 1024) throw new HttpError(400, `${label}: rasm hajmi 15 MB dan oshmasin`);
+  if (file.size < 20 * 1024) throw new HttpError(400, `${label}: rasm juda kichik yoki sifatsiz. Tiniqroq rasm yuklang`);
+  return { file, mime };
+}
+
+/** Yangi generatsiya: rasm(lar) yuklanadi, kredit yechiladi, navbatga qo'shiladi */
+clientRouter.post("/generations", createLimiter, photoFields, async (req, res) => {
   const user = req.user!;
   const body = parse(z.object({
     templateSlug: z.string().min(1),
     consent: z.literal("true", { message: "Rozilik belgisini qo'ying" }),
   }), req.body);
-  const file = req.file;
-  if (!file) throw new HttpError(400, "Rasm yuklang");
-  const mime = fileMime(file);
-  if (!IMAGE_MIMES.includes(mime) || !looksLikeImage(file.buffer)) throw new HttpError(400, "Faqat JPG, PNG yoki WEBP rasm yuklang");
-  if (file.size > 15 * 1024 * 1024) throw new HttpError(400, "Rasm hajmi 15 MB dan oshmasin");
-  if (file.size < 20 * 1024) throw new HttpError(400, "Rasm juda kichik yoki sifatsiz. Tiniqroq rasm yuklang");
 
   const [t] = await db.select().from(templates).where(eq(templates.slug, body.templateSlug));
   const isAdminTest = user.role === "admin" && req.query.test === "1";
   if (!t || (!t.isActive && !isAdminTest)) throw new HttpError(404, "Shablon topilmadi");
 
+  // Shablon nechta rasm so'rasa, shuncha rasm kelishi kerak
+  const files = (req.files || {}) as Record<string, Express.Multer.File[]>;
+  const slotCount = Math.max(1, t.inputSlots.length);
+  const label = (i: number) => t.inputSlots[i]?.label || (slotCount > 1 ? `${i + 1}-rasm` : "Rasm");
+  const photos = Array.from({ length: slotCount }, (_, i) => checkPhoto(files[i === 0 ? "photo" : `photo_${i + 1}`]?.[0], label(i)));
+
   const id = nanoid(14);
-  const inputPath = await saveBuffer("private/uploads", file.buffer, extFromMime(mime, "jpg"), id);
+  const saved: string[] = [];
+  for (const [i, p] of photos.entries()) {
+    saved.push(await saveBuffer("private/uploads", p.file.buffer, extFromMime(p.mime, "jpg"), i === 0 ? id : `${id}_${i + 1}`));
+  }
   try {
     await db.transaction(async (tx) => {
       const cost = isAdminTest ? 0 : t.creditCost;
       const allocations = await consumeCredits(tx, user.id, cost, `"${t.title}" generatsiyasi`, `gen:${id}`);
-      await tx.insert(generations).values({ id, userId: user.id, templateId: t.id, inputPath, creditsSpent: cost, creditAllocations: allocations });
+      await tx.insert(generations).values({
+        id, userId: user.id, templateId: t.id, inputPath: saved[0], extraInputs: saved.slice(1).map((path) => ({ path })),
+        creditsSpent: cost, creditAllocations: allocations,
+      });
     });
   } catch (e) {
-    await deleteFile(inputPath);
+    for (const p of saved) await deleteFile(p);
     if (e instanceof InsufficientCreditsError) {
       return res.status(402).json({ message: `Kredit yetarli emas: kerak ${e.needed}, sizda ${e.balance}`, code: "NO_CREDITS" });
     }
@@ -91,6 +109,7 @@ clientRouter.delete("/generations/:id", async (req, res) => {
   if (g.status === "queued" || g.status === "processing") throw new HttpError(400, "Tayyorlanayotgan ishni o'chirib bo'lmaydi");
   for (const o of g.outputs) await deleteFile(o.path);
   await deleteFile(g.inputPath);
+  for (const x of g.extraInputs) await deleteFile(x.path);
   await db.delete(generations).where(eq(generations.id, g.id));
   res.json({ ok: true });
 });

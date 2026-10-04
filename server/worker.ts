@@ -84,16 +84,25 @@ async function advance(gen: Generation) {
     await db.update(generations).set({ inputFalUrl: inputUrl }).where(eq(generations.id, gen.id));
   }
 
+  // 1b) Qo'shimcha rasmlar (ko'p personajli shablonlar)
+  let extras = gen.extraInputs;
+  if (extras.some((x) => !x.falUrl)) {
+    extras = await Promise.all(extras.map(async (x) => (x.falUrl ? x : { ...x, falUrl: await ai.uploadFile(x.path) })));
+    await db.update(generations).set({ extraInputs: extras }).where(eq(generations.id, gen.id));
+  }
+
   const results = [...gen.stepResults];
   const step = t.steps[gen.stepIndex];
 
   // 2) Qadam hali yuborilmagan bo'lsa — yuboramiz
   if (!gen.currentRequestId) {
     const templateVideo = usesTemplateVideo([step]) ? await ensureTemplateVideoUrl(t) : null;
-    const input = resolveInput(step.input, { user_image: inputUrl, template_video: templateVideo, results }) as Record<string, unknown>;
+    const input = resolveInput(step.input, {
+      user_image: inputUrl, extra_images: extras.map((x) => x.falUrl!), template_video: templateVideo, results,
+    }) as Record<string, unknown>;
     const isVideoPreview = t.previewPath && /\.(mp4|webm|mov)$/i.test(t.previewPath);
     const requestId = await ai.submit(step.endpoint, input, {
-      mockVideoPath: isVideoPreview ? t.previewPath : t.sourceVideoPath,
+      mockVideoPath: isVideoPreview ? t.previewPath : t.sourceVideoPath && /\.(mp4|webm|mov)$/i.test(t.sourceVideoPath) ? t.sourceVideoPath : null,
     });
     await db.update(generations).set({ currentRequestId: requestId, currentEndpoint: step.endpoint, lockedAt: new Date() })
       .where(eq(generations.id, gen.id));
@@ -139,12 +148,13 @@ async function tick() {
 async function cleanup() {
   const s = await getSettings();
   const cutoff = new Date(Date.now() - s.inputRetentionHours * 3_600_000);
-  const old = await db.select({ id: generations.id, inputPath: generations.inputPath }).from(generations)
+  const old = await db.select({ id: generations.id, inputPath: generations.inputPath, extraInputs: generations.extraInputs }).from(generations)
     .where(and(eq(generations.inputDeleted, false), lt(generations.createdAt, cutoff), inArray(generations.status, ["succeeded", "failed"])))
     .limit(500);
   for (const g of old) {
     await deleteFile(g.inputPath);
-    await db.update(generations).set({ inputDeleted: true, inputPath: null, inputFalUrl: null }).where(eq(generations.id, g.id));
+    for (const x of g.extraInputs) await deleteFile(x.path);
+    await db.update(generations).set({ inputDeleted: true, inputPath: null, inputFalUrl: null, extraInputs: [] }).where(eq(generations.id, g.id));
   }
   if (old.length) log(`${old.length} ta eski rasm o'chirildi`);
 }
