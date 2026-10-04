@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ImagePlus, Zap, PawPrint, Sun, ScanFace, Image as ImageIcon, X } from "lucide-react";
+import { ChevronLeft, ImagePlus, Zap, PawPrint, Sun, ScanFace, Image as ImageIcon, X, Check } from "lucide-react";
 import { api, ApiError, queryClient, type TemplateCard } from "@/lib/api";
 import { useMe } from "@/lib/hooks";
 import { TemplatePreview } from "@/components/TemplateCard";
@@ -77,6 +77,7 @@ export function TemplatePage() {
   const [files, setFiles] = useState<(File | null)[]>([]);
   const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [variantKey, setVariantKey] = useState("");
 
   if (isLoading) return <PageLoader />;
   if (error || !t) return <Empty title="Shablon topilmadi" action={<Link href="/" className="text-brand-light">Bosh sahifaga</Link>} />;
@@ -84,6 +85,9 @@ export function TemplatePage() {
   const slots = t.inputSlots?.length ? t.inputSlots : [{ label: "Rasmingiz" }];
   const multi = slots.length > 1;
   const allPicked = slots.every((_, i) => files[i]);
+  const variants = t.variants ?? [];
+  const variant = variants.find((v) => v.key === variantKey) ?? variants[0];
+  const cost = variant?.creditCost ?? t.creditCost;
 
   async function submit() {
     if (!user) return navigate(`/login?next=/t/${slug}`);
@@ -93,6 +97,7 @@ export function TemplatePage() {
     const form = new FormData();
     form.append("templateSlug", t!.slug);
     form.append("consent", "true");
+    if (variant?.key) form.append("variant", variant.key);
     slots.forEach((_, i) => form.append(i === 0 ? "photo" : `photo_${i + 1}`, files[i]!));
     setBusy(true);
     try {
@@ -110,7 +115,7 @@ export function TemplatePage() {
     }
   }
 
-  const enough = balance >= t.creditCost;
+  const enough = balance >= cost;
 
   return (
     <div>
@@ -127,9 +132,31 @@ export function TemplatePage() {
           <h1 className="text-3xl font-extrabold">{t.title}</h1>
           {t.description && <p className="mt-2 text-white/60">{t.description}</p>}
           <div className="mt-3 flex flex-wrap gap-2 text-sm">
-            <span className="flex items-center gap-1 rounded-full bg-card px-3 py-1 ring-1 ring-line"><Zap className="h-4 w-4 fill-amber-300 text-amber-300" />{t.creditCost} kredit</span>
+            <span className="flex items-center gap-1 rounded-full bg-card px-3 py-1 ring-1 ring-line"><Zap className="h-4 w-4 fill-amber-300 text-amber-300" />{variants.length ? `${Math.min(...variants.map((v) => v.creditCost))} kreditdan` : `${t.creditCost} kredit`}</span>
             {t.allowAnimals && <span className="flex items-center gap-1 rounded-full bg-card px-3 py-1 ring-1 ring-line"><PawPrint className="h-4 w-4" />Hayvon rasmi ham mumkin</span>}
           </div>
+
+          {variants.length > 1 && (
+            <div className="mt-6">
+              <div className="label">Variantni tanlang</div>
+              <div className="grid gap-2 sm:grid-cols-2" role="radiogroup">
+                {variants.map((v) => {
+                  const on = v.key === variant?.key;
+                  return (
+                    <button key={v.key || "main"} type="button" role="radio" aria-checked={on} onClick={() => setVariantKey(v.key)}
+                      className={clsx("relative rounded-2xl border p-4 text-left transition", on ? "border-brand bg-brand/10" : "border-line bg-card hover:border-white/30")}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold">{v.label}</span>
+                        <span className="flex shrink-0 items-center gap-1 text-sm font-semibold"><Zap className="h-4 w-4 fill-amber-300 text-amber-300" />{v.creditCost}</span>
+                      </div>
+                      <div className="mt-1 text-xs text-white/50">{v.hint || (v.key ? "" : "Yuz, soch, gavda va kiyim to'liq almashtiriladi — viral videolar uchun eng yaxshisi")}</div>
+                      {on && <Check className="absolute -right-1.5 -top-1.5 h-5 w-5 rounded-full bg-brand p-0.5" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           <div className="mt-6">
             {multi && <p className="mb-3 rounded-xl bg-brand/10 px-4 py-2.5 text-sm text-white/80">Bu videoda {slots.length} ta personaj bor — har biri uchun alohida rasm yuklang.</p>}
@@ -160,7 +187,7 @@ export function TemplatePage() {
 
           <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
             <Button size="lg" loading={busy} onClick={submit} disabled={!!user && (!allPicked || !consent)} className="w-full sm:w-auto">
-              {user ? `Yaratish · ${t.creditCost} kredit` : "Kirish va yaratish"}
+              {user ? `Yaratish · ${cost} kredit` : "Kirish va yaratish"}
             </Button>
             {user && !enough && (
               <Link href="/pricing" className="text-center text-sm text-amber-300 underline">Kreditingiz {balance} ta — kredit sotib oling</Link>

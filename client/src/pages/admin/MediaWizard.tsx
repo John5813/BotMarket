@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Sparkles, PenLine, User, PawPrint, TriangleAlert, ChevronLeft, Film, Image as ImageIcon } from "lucide-react";
 import { api } from "@/lib/api";
-import { buildMultiCharacterSteps, buildStepsFromAnalysis } from "@shared/presets";
-import type { InputSlot, PipelineStep } from "@shared/schema";
-import { Button, Modal, Spinner, clsx, useToast } from "@/components/ui";
+import { FACE_SWAP_VARIANT, MAIN_VARIANT_LABEL, buildMultiCharacterSteps, buildStepsFromAnalysis } from "@shared/presets";
+import type { InputSlot, PipelineStep, TemplateVariant } from "@shared/schema";
+import { Button, Modal, Spinner, Toggle, clsx, useToast } from "@/components/ui";
 
 export type Analysis = {
   titleUz: string; descriptionUz: string; inputHintUz: string;
@@ -18,10 +18,10 @@ export type WizardResult = {
   poster: File | null;
   mediaType: "video" | "image";
   /** AI tahlil qilingan bo'lsa — formaga qo'llanadigan qiymatlar */
-  fill?: { title: string; description: string; inputHint: string; allowAnimals: boolean; kind: Kind; steps: PipelineStep[]; inputSlots: InputSlot[] };
+  fill?: { title: string; description: string; inputHint: string; allowAnimals: boolean; kind: Kind; steps: PipelineStep[]; inputSlots: InputSlot[]; mainLabel?: string; variants?: TemplateVariant[] };
 };
 
-type Kind = "character_replace" | "multi_character" | "effect" | "photoshoot";
+type Kind = "motion_control" | "character_replace" | "multi_character" | "effect" | "photoshoot";
 const MAX_SIDE = 768;
 const MAX_MULTI = 4; // Kling O1 Video Edit: ko'pi bilan 4 ta rasm
 
@@ -40,15 +40,18 @@ function once(el: HTMLElement, ev: string, timeout = 8000) {
   });
 }
 
-/** Brauzerning o'zida videodan 4 ta kadr (yoki rasmdan 1 ta) ajratib olish */
-async function extractFrames(file: File): Promise<string[]> {
+/**
+ * Brauzerning o'zida videodan 4 ta kadr (yoki rasmdan 1 ta) ajratib olish.
+ * first — videoning eng birinchi kadri: Motion Control shu kadrdan boshlanadi, shuning uchun poster aynan u bo'ladi.
+ */
+async function extractFrames(file: File): Promise<{ frames: string[]; first: string | null }> {
   const url = URL.createObjectURL(file);
   try {
     if (file.type.startsWith("image/")) {
       const img = new Image();
       img.src = url;
       await img.decode();
-      return [drawToJpeg(img, img.naturalWidth, img.naturalHeight)];
+      return { frames: [drawToJpeg(img, img.naturalWidth, img.naturalHeight)], first: null };
     }
     const v = document.createElement("video");
     v.muted = true; v.playsInline = true; v.preload = "auto"; v.src = url;
@@ -60,13 +63,16 @@ async function extractFrames(file: File): Promise<string[]> {
       await once(v, "seeked").catch(() => {});
       duration = Number.isFinite(v.duration) ? v.duration : 4;
     }
+    v.currentTime = Math.min(0.05, duration / 10);
+    await once(v, "seeked");
+    const first = drawToJpeg(v, v.videoWidth, v.videoHeight);
     const frames: string[] = [];
     for (const p of [0.08, 0.35, 0.62, 0.88]) {
       v.currentTime = Math.max(0, duration * p);
       await once(v, "seeked");
       frames.push(drawToJpeg(v, v.videoWidth, v.videoHeight));
     }
-    return frames;
+    return { frames, first };
   } finally {
     URL.revokeObjectURL(url);
   }
@@ -79,7 +85,8 @@ async function dataUrlToFile(dataUrl: string, name: string) {
 
 const KIND_OPTIONS = {
   video: [
-    ["character_replace", "Bitta qahramon", "Bitta odam almashtiriladi, harakat aynan saqlanadi (raqs, yurish)"],
+    ["motion_control", "Butun personaj (viral)", "1-kadrda odam to'liq almashtiriladi, Kling Motion Control harakatni aynan o'tkazadi"],
+    ["character_replace", "Bitta qahramon (Wan)", "Bitta odam almashtiriladi, harakat aynan saqlanadi (raqs, yurish)"],
     ["multi_character", "Ko'p personajli", "2–4 kishi, har biri mijozning alohida rasmi bilan almashtiriladi"],
     ["effect", "Effekt", "Sahna mijoz rasmidan qayta yaratiladi va jonlantiriladi"],
   ],
@@ -95,6 +102,8 @@ export function MediaWizard({ open, onClose, onDone }: { open: boolean; onClose:
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [frames, setFrames] = useState<string[]>([]);
+  const [firstFrame, setFirstFrame] = useState<string | null>(null);
+  const [withFace, setWithFace] = useState(true);
   const [stage, setStage] = useState<"pick" | "frames" | "analyzing" | "result">("pick");
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [charId, setCharId] = useState<number | null>(null);
@@ -104,7 +113,7 @@ export function MediaWizard({ open, onClose, onDone }: { open: boolean; onClose:
 
   useEffect(() => {
     if (!open) return;
-    setFile(null); setPreview(null); setFrames([]); setStage("pick"); setAnalysis(null); setCharId(null); setFrameIdx(0); setMultiIds([]);
+    setFile(null); setPreview(null); setFrames([]); setFirstFrame(null); setWithFace(true); setStage("pick"); setAnalysis(null); setCharId(null); setFrameIdx(0); setMultiIds([]);
   }, [open]);
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
 
@@ -118,9 +127,12 @@ export function MediaWizard({ open, onClose, onDone }: { open: boolean; onClose:
     setPreview(URL.createObjectURL(f));
     setStage("frames");
     try {
-      setFrames(await extractFrames(f));
+      const r = await extractFrames(f);
+      setFrames(r.frames);
+      setFirstFrame(r.first);
     } catch {
       setFrames([]);
+      setFirstFrame(null);
       toast("Kadrlarni ajratib bo'lmadi — qo'lda kiritishingiz mumkin", "error");
     }
   }
@@ -139,7 +151,7 @@ export function MediaWizard({ open, onClose, onDone }: { open: boolean; onClose:
         setKind("multi_character");
         setMultiIds((humans.length >= 2 ? humans : a.characters).slice(0, Math.min(2, MAX_MULTI)).map((c) => c.id));
       } else {
-        setKind(mediaType === "image" ? (rk === "photoshoot" ? "photoshoot" : "effect") : rk === "character_replace" ? "character_replace" : "effect");
+        setKind(mediaType === "image" ? (rk === "photoshoot" ? "photoshoot" : "effect") : rk === "character_replace" ? "motion_control" : "effect");
       }
       const main = a.characters.find((c) => c.id === a.mainCharacterId);
       setFrameIdx(main?.frame ?? 0);
@@ -152,7 +164,8 @@ export function MediaWizard({ open, onClose, onDone }: { open: boolean; onClose:
 
   async function finish(useAi: boolean) {
     if (!file) return;
-    const poster = frames[0] ? await dataUrlToFile(frames[0], "poster.jpg") : null;
+    const posterSrc = firstFrame || frames[0];
+    const poster = posterSrc ? await dataUrlToFile(posterSrc, "poster.jpg") : null;
     if (!useAi || !analysis) {
       onDone({
         file, poster, mediaType,
@@ -178,13 +191,16 @@ export function MediaWizard({ open, onClose, onDone }: { open: boolean; onClose:
       return;
     }
     const ch = analysis.characters.find((c) => c.id === charId);
+    const faceOk = mediaType === "video" && (kind === "motion_control" || kind === "character_replace");
     onDone({
       file, poster, mediaType,
       fill: {
         title: analysis.titleUz, description: analysis.descriptionUz, inputHint: analysis.inputHintUz,
         allowAnimals: analysis.allowAnimals || ch?.type === "animal",
-        kind, steps: buildStepsFromAnalysis(analysis, { mediaType, kind: kind as "character_replace" | "effect" | "photoshoot", characterId: charId }),
+        kind, steps: buildStepsFromAnalysis(analysis, { mediaType, kind: kind as "motion_control" | "character_replace" | "effect" | "photoshoot", characterId: charId }),
         inputSlots: [],
+        mainLabel: MAIN_VARIANT_LABEL,
+        variants: faceOk && withFace ? [structuredClone(FACE_SWAP_VARIANT)] : [],
       },
     });
   }
@@ -298,7 +314,7 @@ export function MediaWizard({ open, onClose, onDone }: { open: boolean; onClose:
                 <div className="grid gap-2 sm:grid-cols-2">
                   {KIND_OPTIONS[mediaType].map(([k, t, d]) => (
                     <button key={k} onClick={() => setKind(k)} className={clsx("rounded-xl border p-3 text-left text-sm", kind === k ? "border-brand bg-brand/10" : "border-line hover:border-white/30")}>
-                      <div className="font-medium">{t}{analysis.recommendedKind === k && <span className="ml-1.5 text-xs text-brand-light">· AI tavsiyasi</span>}</div>
+                      <div className="font-medium">{t}{(analysis.recommendedKind === "character_replace" && mediaType === "video" ? "motion_control" : analysis.recommendedKind) === k && <span className="ml-1.5 text-xs text-brand-light">· AI tavsiyasi</span>}</div>
                       <div className="text-xs text-white/50">{d}</div>
                     </button>
                   ))}
@@ -308,6 +324,12 @@ export function MediaWizard({ open, onClose, onDone }: { open: boolean; onClose:
                 )}
                 {notMp4 && (
                   <p className="mt-2 text-xs text-red-300">Ko'p personajli model (Kling O1) faqat MP4 yoki MOV videoni qabul qiladi. Bu faylni MP4 ga o'tkazib yuklang, aks holda generatsiya xato beradi.</p>
+                )}
+                {mediaType === "video" && (kind === "motion_control" || kind === "character_replace") && (
+                  <div className="mt-3 rounded-xl border border-line p-3">
+                    <Toggle checked={withFace} onChange={setWithFace} label="Arzon variant ham bo'lsin: «Faqat yuz»" />
+                    <p className="mt-1 text-xs text-white/50">Mijoz o'zi tanlaydi: «Butun personaj» (yuz + gavda + kiyim, qimmatroq) yoki «Faqat yuz» (arzon, tez). Narxlarni keyin formada belgilaysiz.</p>
+                  </div>
                 )}
                 {kind === "character_replace" && analysis.characters.length > 1 && (
                   <p className="mt-2 text-xs text-amber-200">Eslatma: "Qahramonni almashtirish" modeli videodagi eng ko'zga tashlanadigan personajni o'zi tanlaydi. Bir nechta odam bo'lsa, natijani albatta sinab ko'ring.</p>

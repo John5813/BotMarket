@@ -2,7 +2,7 @@ import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import { db } from "./db";
 import { generations, templates, type Generation, type StepResult, type Template } from "@shared/schema";
 import { ai } from "./ai/provider";
-import { extractOutputUrl, finalStepIndexes, resolveInput, usesTemplateVideo, estimateCostUsd } from "./ai/pipeline";
+import { extractOutputUrl, finalStepIndexes, resolveInput, usesTemplateVideo, usesTemplateFrame, estimateCostUsd, stepsForVariant } from "./ai/pipeline";
 import { refundCredits } from "./credits";
 import { deleteFile, downloadToPrivate } from "./files";
 import { getSettings } from "./settings";
@@ -51,8 +51,9 @@ async function ensureTemplateVideoUrl(t: Template) {
 }
 
 async function finalize(gen: Generation, t: Template, results: StepResult[]) {
+  const steps = stepsForVariant(t, gen.variantKey);
   const outputs: { path: string; type: "video" | "image" }[] = [];
-  for (const idx of finalStepIndexes(t.steps)) {
+  for (const idx of finalStepIndexes(steps)) {
     const r = results[idx];
     if (!r) continue;
     const path = await downloadToPrivate(r.url, "private/outputs", `${gen.id}_${idx}`, r.type === "video" ? "mp4" : "png");
@@ -61,7 +62,7 @@ async function finalize(gen: Generation, t: Template, results: StepResult[]) {
   if (!outputs.length) throw new Error("Natija fayli topilmadi");
   await db.update(generations).set({
     status: "succeeded", outputs, stepResults: results, finishedAt: new Date(), currentRequestId: null,
-    costUsd: estimateCostUsd(t.steps),
+    costUsd: estimateCostUsd(steps),
   }).where(eq(generations.id, gen.id));
   await db.update(templates).set({ usageCount: sql`${templates.usageCount} + 1` }).where(eq(templates.id, t.id));
   log("tayyor", gen.id);
@@ -74,7 +75,8 @@ async function advance(gen: Generation) {
   }
   const [t] = gen.templateId ? await db.select().from(templates).where(eq(templates.id, gen.templateId)) : [];
   if (!t) return failGeneration(gen, "Shablon topilmadi");
-  if (!t.steps.length) return failGeneration(gen, "Shablonda qadamlar yo'q");
+  const steps = stepsForVariant(t, gen.variantKey);
+  if (!steps.length) return failGeneration(gen, "Shablonda (yoki tanlangan variantda) qadamlar yo'q");
 
   // 1) Mijoz rasmini AI serveriga yuklash (bir marta)
   let inputUrl = gen.inputFalUrl;
@@ -92,13 +94,14 @@ async function advance(gen: Generation) {
   }
 
   const results = [...gen.stepResults];
-  const step = t.steps[gen.stepIndex];
+  const step = steps[gen.stepIndex];
 
   // 2) Qadam hali yuborilmagan bo'lsa — yuboramiz
   if (!gen.currentRequestId) {
     const templateVideo = usesTemplateVideo([step]) ? await ensureTemplateVideoUrl(t) : null;
+    const templateFrame = usesTemplateFrame([step]) && t.posterPath ? await ai.uploadFile(t.posterPath) : null;
     const input = resolveInput(step.input, {
-      user_image: inputUrl, extra_images: extras.map((x) => x.falUrl!), template_video: templateVideo, results,
+      user_image: inputUrl, extra_images: extras.map((x) => x.falUrl!), template_video: templateVideo, template_frame: templateFrame, results,
     }) as Record<string, unknown>;
     const isVideoPreview = t.previewPath && /\.(mp4|webm|mov)$/i.test(t.previewPath);
     const requestId = await ai.submit(step.endpoint, input, {
@@ -106,7 +109,7 @@ async function advance(gen: Generation) {
     });
     await db.update(generations).set({ currentRequestId: requestId, currentEndpoint: step.endpoint, lockedAt: new Date() })
       .where(eq(generations.id, gen.id));
-    log("yuborildi", gen.id, `qadam ${gen.stepIndex + 1}/${t.steps.length}`, step.endpoint);
+    log("yuborildi", gen.id, `qadam ${gen.stepIndex + 1}/${steps.length}`, step.endpoint, gen.variantKey ? `[${gen.variantKey}]` : "");
     return;
   }
 
@@ -125,7 +128,7 @@ async function advance(gen: Generation) {
   if (!url) return failGeneration(gen, `AI natijasida ${step.output} topilmadi`);
   results.push({ url, type: step.output, requestId: gen.currentRequestId });
 
-  if (gen.stepIndex + 1 < t.steps.length) {
+  if (gen.stepIndex + 1 < steps.length) {
     await db.update(generations).set({ stepResults: results, stepIndex: gen.stepIndex + 1, currentRequestId: null, attempts: 0 })
       .where(eq(generations.id, gen.id));
     return;

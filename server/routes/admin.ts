@@ -8,7 +8,7 @@ import {
 import { requireAdmin, publicUser } from "../auth";
 import { consumeCredits, getBalance, grantCredits, InsufficientCreditsError } from "../credits";
 import { absPath, deleteFile, extFromMime, fileMime, IMAGE_MIMES, publicUrl, saveBuffer, VIDEO_MIMES } from "../files";
-import { estimateCostUsd, maxUserImageIndex, usesTemplateVideo, validateSteps } from "../ai/pipeline";
+import { estimateCostUsd, maxUserImageIndex, usesTemplateFrame, usesTemplateVideo, validateSteps } from "../ai/pipeline";
 import { getSettings, updateSettings, DEFAULT_SETTINGS } from "../settings";
 import { generationDto, HttpError, parse, slugify, upload } from "./helpers";
 import { ai } from "../ai/provider";
@@ -112,7 +112,15 @@ const templateSchema = z.object({
   slug: z.string().trim().max(60).optional().default(""),
   description: z.string().max(500).default(""),
   categoryId: z.coerce.number().int().positive().nullable().optional(),
-  kind: z.enum(["character_replace", "multi_character", "effect", "photoshoot", "custom"]),
+  kind: z.enum(["motion_control", "character_replace", "multi_character", "effect", "photoshoot", "custom"]),
+  mainLabel: z.string().trim().max(40).default("Butun personaj"),
+  variants: z.array(z.object({
+    key: z.string().trim().regex(/^[a-z0-9_-]{1,30}$/, "Variant kaliti: kichik lotin harflari, raqam, - yoki _"),
+    label: z.string().trim().min(1, "Variant nomini kiriting").max(40),
+    hint: z.string().trim().max(120).optional(),
+    creditCost: z.coerce.number().int().min(0).max(100),
+    steps: z.unknown(),
+  })).max(3, "Ko'pi bilan 3 ta qo'shimcha variant").default([]),
   inputSlots: z.array(z.object({
     label: z.string().trim().min(1, "Rasm joyiga nom bering").max(40),
     hint: z.string().trim().max(120).optional(),
@@ -138,7 +146,14 @@ async function saveTemplate(req: any, existing?: Template) {
   const b = parse(templateSchema, raw);
   const steps = validateSteps(b.steps);
   if (!steps.ok) throw new HttpError(400, steps.error);
-  const needImages = maxUserImageIndex(steps.steps);
+  const variants = b.variants.map((v) => {
+    const vs = validateSteps(v.steps);
+    if (!vs.ok) throw new HttpError(400, `"${v.label}" varianti: ${vs.error}`);
+    return { key: v.key, label: v.label, hint: v.hint, creditCost: v.creditCost, steps: vs.steps };
+  });
+  if (new Set(variants.map((v) => v.key)).size !== variants.length) throw new HttpError(400, "Variant kalitlari takrorlanmasin");
+  const allSteps = [...steps.steps, ...variants.flatMap((v) => v.steps)];
+  const needImages = maxUserImageIndex(allSteps);
   const slotCount = Math.max(1, b.inputSlots.length);
   if (needImages > slotCount) {
     throw new HttpError(400, `Retsept {{user_image_${needImages}}} ishlatadi, lekin faqat ${slotCount} ta rasm joyi bor — "Mijozdan so'raladigan rasmlar" bo'limiga qo'shing`);
@@ -162,7 +177,10 @@ async function saveTemplate(req: any, existing?: Template) {
     paths.sourceVideoPath = await saveBuffer("private/templates", src.buffer, extFromMime(fileMime(src), "mp4"));
   }
 
-  if (usesTemplateVideo(steps.steps) && !paths.sourceVideoPath && !existing?.sourceVideoPath) {
+  if (usesTemplateFrame(allSteps) && !paths.posterPath && !existing?.posterPath) {
+    throw new HttpError(400, "Retsept {{template_frame}} (videoning 1-kadri) ishlatadi — muqova rasmni yuklang");
+  }
+  if (usesTemplateVideo(allSteps) && !paths.sourceVideoPath && !existing?.sourceVideoPath) {
     throw new HttpError(400, "Bu retsept shablonning asl mediasini ishlatadi — asl video yoki rasmni yuklang");
   }
   if (b.isActive && !paths.previewPath && !existing?.previewPath) {
@@ -177,7 +195,7 @@ async function saveTemplate(req: any, existing?: Template) {
     title: b.title, slug, description: b.description, categoryId: b.categoryId ?? null, kind: b.kind,
     creditCost: b.creditCost, allowAnimals: b.allowAnimals, inputHint: b.inputHint,
     isActive: b.isActive, isFeatured: b.isFeatured, isNew: b.isNew, sortOrder: b.sortOrder,
-    steps: steps.steps, inputSlots: b.inputSlots.length > 1 ? b.inputSlots : b.inputSlots.slice(0, 1), updatedAt: new Date(), ...paths,
+    steps: steps.steps, variants, mainLabel: b.mainLabel || "Butun personaj", inputSlots: b.inputSlots.length > 1 ? b.inputSlots : b.inputSlots.slice(0, 1), updatedAt: new Date(), ...paths,
     ...(paths.sourceVideoPath ? { sourceFalUrl: null, sourceFalUploadedAt: null } : {}),
   };
   if (existing) {

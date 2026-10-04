@@ -45,6 +45,12 @@ export type PipelineStep = {
   costUsd?: number;                      // taxminiy tannarx (hisobot uchun)
 };
 
+/**
+ * Qo'shimcha variant (masalan arzon "Faqat yuz"). Asosiy variant — shablonning o'z steps/creditCost'i.
+ * Mijoz shablon sahifasida variantni tanlaydi.
+ */
+export type TemplateVariant = { key: string; label: string; hint?: string; creditCost: number; steps: PipelineStep[] };
+
 /** Mijozdan so'raladigan rasm joyi (ko'p personajli shablonlar uchun) */
 export type InputSlot = { label: string; hint?: string };
 
@@ -54,7 +60,7 @@ export const templates = pgTable("templates", {
   title: text("title").notNull(),
   description: text("description").notNull().default(""),
   categoryId: integer("category_id").references(() => categories.id, { onDelete: "set null" }),
-  kind: text("kind").$type<"character_replace" | "multi_character" | "effect" | "photoshoot" | "custom">().notNull().default("effect"),
+  kind: text("kind").$type<"motion_control" | "character_replace" | "multi_character" | "effect" | "photoshoot" | "custom">().notNull().default("effect"),
   previewPath: text("preview_path"),        // kartochkada ko'rinadigan namuna (video yoki rasm)
   posterPath: text("poster_path"),          // video yuklanguncha ko'rinadigan rasm
   sourceVideoPath: text("source_video_path"), // qahramon almashtirish uchun asl video
@@ -63,6 +69,9 @@ export const templates = pgTable("templates", {
   steps: jsonb("steps").$type<PipelineStep[]>().notNull().default([]),
   /** Bo'sh bo'lsa — bitta oddiy rasm. Har bir element {{user_image_N}} ga mos keladi */
   inputSlots: jsonb("input_slots").$type<InputSlot[]>().notNull().default([]),
+  /** Asosiy variant nomi (variantlar bo'lsa ko'rsatiladi) */
+  mainLabel: text("main_label").notNull().default("Butun personaj"),
+  variants: jsonb("variants").$type<TemplateVariant[]>().notNull().default([]),
   creditCost: integer("credit_cost").notNull().default(1),
   allowAnimals: boolean("allow_animals").notNull().default(false),
   inputHint: text("input_hint").notNull().default(""),
@@ -91,6 +100,8 @@ export const generations = pgTable("generations", {
   inputDeleted: boolean("input_deleted").notNull().default(false),
   /** 2-, 3-... rasmlar (ko'p personajli shablonlar) */
   extraInputs: jsonb("extra_inputs").$type<{ path: string; falUrl?: string | null }[]>().notNull().default([]),
+  /** null — asosiy variant, aks holda templates.variants[].key */
+  variantKey: text("variant_key"),
   stepIndex: integer("step_index").notNull().default(0),
   stepResults: jsonb("step_results").$type<StepResult[]>().notNull().default([]),
   currentRequestId: text("current_request_id"),

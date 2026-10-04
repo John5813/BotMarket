@@ -38,6 +38,8 @@ export type TemplateCard = {
   previewUrl: string | null; previewIsVideo: boolean; posterUrl: string | null; creditCost: number;
   allowAnimals: boolean; inputHint: string; isFeatured: boolean; isNew: boolean; usageCount: number;
   inputSlots?: { label: string; hint?: string }[];
+  /** Bo'sh bo'lmasa: birinchisi asosiy variant (key ""), qolganlari arzonroq/boshqa variantlar */
+  variants?: { key: string; label: string; hint: string; creditCost: number }[];
 };
 export type Catalog = { featured: TemplateCard[]; categories: { id: number; title: string; slug: string; emoji: string; templates: TemplateCard[] }[] };
 export type GenerationItem = {

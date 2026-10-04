@@ -1,4 +1,4 @@
-import type { PipelineStep } from "./schema";
+import type { PipelineStep, TemplateVariant } from "./schema";
 
 /**
  * Admin paneldagi tayyor "retseptlar". Admin shablon turini tanlaganda
@@ -6,9 +6,35 @@ import type { PipelineStep } from "./schema";
  * Model nomlari fal.ai endpoint identifikatorlari.
  */
 export const PIPELINE_PRESETS: Record<
-  "character_replace" | "multi_character" | "effect" | "photoshoot",
+  "motion_control" | "character_replace" | "multi_character" | "effect" | "photoshoot",
   { title: string; description: string; needsSourceVideo: boolean; steps: PipelineStep[] }
 > = {
+  motion_control: {
+    title: "Butun personaj — Motion Control (viral uslub)",
+    description:
+      "1-qadam: videoning birinchi kadridagi odam mijoz bilan almashtiriladi (rasm AI). 2-qadam: Kling Motion Control shu kadrni asl videodagi harakat bilan jonlantiradi. Asl video va poster (1-kadr) kerak — poster avtomatik olinadi.",
+    needsSourceVideo: true,
+    steps: [
+      {
+        label: "1-kadrda personajni almashtirish",
+        endpoint: "fal-ai/nano-banana/edit",
+        input: {
+          prompt:
+            "Replace the main person in the first image with the person from the second image (face, hair, body shape). Keep the exact same pose, position, framing, clothing style, lighting, background and composition of the first image. Photorealistic, high detail.",
+          image_urls: ["{{template_frame}}", "{{user_image}}"],
+        },
+        output: "image",
+        costUsd: 0.04,
+      },
+      {
+        label: "Harakatni o'tkazish (Motion Control)",
+        endpoint: "fal-ai/kling-video/v3/pro/motion-control",
+        input: { image_url: "{{prev}}", video_url: "{{template_video}}", character_orientation: "video" },
+        output: "video",
+        costUsd: 0.6,
+      },
+    ],
+  },
   character_replace: {
     title: "Qahramonni almashtirish (raqs, hayvon)",
     description:
@@ -96,12 +122,35 @@ export const PIPELINE_PRESETS: Record<
 };
 
 export const KIND_LABELS: Record<string, string> = {
+  motion_control: "Butun personaj (Motion Control)",
   character_replace: "Qahramon almashtirish",
   multi_character: "Ko'p personajli video",
   effect: "Effekt",
   photoshoot: "Fotosessiya",
   custom: "Maxsus",
 };
+
+/**
+ * Arzon variant: faqat yuz almashtiriladi (kiyim, gavda va sahna asl videodagidek qoladi).
+ * Parametr nomlarini fal.ai sahifasida tekshirib oling — admin ularni tahrirlashi mumkin.
+ */
+export const FACE_SWAP_VARIANT: TemplateVariant = {
+  key: "face",
+  label: "Faqat yuz",
+  hint: "Arzon va tez — faqat yuz almashtiriladi, kiyim va gavda asl videodagidek qoladi",
+  creditCost: 1,
+  steps: [
+    {
+      label: "Yuzni almashtirish",
+      endpoint: "half-moon-ai/ai-face-swap/faceswapvideo",
+      input: { source_face_url: "{{user_image}}", target_video_url: "{{template_video}}" },
+      output: "video",
+      costUsd: 0.15,
+    },
+  ],
+};
+
+export const MAIN_VARIANT_LABEL = "Butun personaj";
 
 export const STATUS_LABELS: Record<string, string> = {
   queued: "Navbatda",
@@ -132,11 +181,25 @@ const KEEP_FACE = "Keep the exact face, identity, skin tone and hairstyle of the
 
 export function buildStepsFromAnalysis(
   a: AnalysisLike,
-  opts: { mediaType: "video" | "image"; kind: "character_replace" | "effect" | "photoshoot"; characterId: number | null },
+  opts: { mediaType: "video" | "image"; kind: "motion_control" | "character_replace" | "effect" | "photoshoot"; characterId: number | null },
 ): PipelineStep[] {
   const ch = a.characters.find((c) => c.id === opts.characterId) || a.characters[0];
   const who = ch?.descriptionEn || "the main character";
   const motion = a.motion || "The person looks at the camera and smiles naturally, subtle camera push-in";
+
+  if (opts.kind === "motion_control" && opts.mediaType === "video") {
+    const [edit, motionStep] = PIPELINE_PRESETS.motion_control.steps;
+    return [
+      {
+        ...edit,
+        input: {
+          ...edit.input,
+          prompt: `In the first image, replace ${who} with the person from the second image (face, hair, body shape). Keep the exact same pose, position, framing, lighting, background and composition of the first image. Scene: ${a.scene || "unchanged"}. ${KEEP_FACE}`,
+        },
+      },
+      motionStep,
+    ];
+  }
 
   if (opts.kind === "character_replace" && opts.mediaType === "video") {
     return [{ ...PIPELINE_PRESETS.character_replace.steps[0], label: `Almashtirish: ${who}`.slice(0, 60) }];

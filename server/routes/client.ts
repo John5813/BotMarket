@@ -36,11 +36,14 @@ clientRouter.post("/generations", createLimiter, photoFields, async (req, res) =
   const body = parse(z.object({
     templateSlug: z.string().min(1),
     consent: z.literal("true", { message: "Rozilik belgisini qo'ying" }),
+    variant: z.string().max(40).optional().default(""),
   }), req.body);
 
   const [t] = await db.select().from(templates).where(eq(templates.slug, body.templateSlug));
   const isAdminTest = user.role === "admin" && req.query.test === "1";
   if (!t || (!t.isActive && !isAdminTest)) throw new HttpError(404, "Shablon topilmadi");
+  const variant = body.variant ? t.variants.find((v) => v.key === body.variant) : null;
+  if (body.variant && !variant) throw new HttpError(400, "Tanlangan variant topilmadi");
 
   // Shablon nechta rasm so'rasa, shuncha rasm kelishi kerak
   const files = (req.files || {}) as Record<string, Express.Multer.File[]>;
@@ -55,10 +58,10 @@ clientRouter.post("/generations", createLimiter, photoFields, async (req, res) =
   }
   try {
     await db.transaction(async (tx) => {
-      const cost = isAdminTest ? 0 : t.creditCost;
-      const allocations = await consumeCredits(tx, user.id, cost, `"${t.title}" generatsiyasi`, `gen:${id}`);
+      const cost = isAdminTest ? 0 : variant ? variant.creditCost : t.creditCost;
+      const allocations = await consumeCredits(tx, user.id, cost, `"${t.title}"${variant ? ` (${variant.label})` : ""} generatsiyasi`, `gen:${id}`);
       await tx.insert(generations).values({
-        id, userId: user.id, templateId: t.id, inputPath: saved[0], extraInputs: saved.slice(1).map((path) => ({ path })),
+        id, userId: user.id, templateId: t.id, variantKey: variant?.key ?? null, inputPath: saved[0], extraInputs: saved.slice(1).map((path) => ({ path })),
         creditsSpent: cost, creditAllocations: allocations,
       });
     });

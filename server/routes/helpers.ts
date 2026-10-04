@@ -39,15 +39,20 @@ export function templateDto(t: Template) {
     previewUrl: publicUrl(t.previewPath), previewIsVideo: isVideo(t.previewPath), posterUrl: publicUrl(t.posterPath),
     creditCost: t.creditCost, allowAnimals: t.allowAnimals, inputHint: t.inputHint,
     inputSlots: t.inputSlots.length ? t.inputSlots : [{ label: "Rasmingiz" }],
+    // Mijoz tanlaydigan variantlar (faqat nom va narx — retseptlar sir)
+    variants: t.variants.length
+      ? [{ key: "", label: t.mainLabel, hint: "", creditCost: t.creditCost }, ...t.variants.map((v) => ({ key: v.key, label: v.label, hint: v.hint || "", creditCost: v.creditCost }))]
+      : [],
     isFeatured: t.isFeatured, isNew: t.isNew, usageCount: t.usageCount,
   };
 }
 
-export function generationDto(g: Generation, t?: Pick<Template, "title" | "slug" | "steps"> | null, admin = false) {
+export function generationDto(g: Generation, t?: Pick<Template, "title" | "slug" | "steps" | "variants"> | null, admin = false) {
   return {
     id: g.id, status: g.status, createdAt: g.createdAt, finishedAt: g.finishedAt, creditsSpent: g.creditsSpent,
     templateTitle: t?.title ?? "O'chirilgan shablon", templateSlug: t?.slug ?? null,
-    stepIndex: g.stepIndex, totalSteps: t?.steps.length ?? 1,
+    stepIndex: g.stepIndex, totalSteps: (g.variantKey ? t?.variants.find((v) => v.key === g.variantKey)?.steps.length : t?.steps.length) ?? 1,
+    variantLabel: g.variantKey ? t?.variants.find((v) => v.key === g.variantKey)?.label ?? null : null,
     outputs: g.outputs.map((o, i) => ({ type: o.type, url: `/api/generations/${g.id}/file/${i}` })),
     error: g.status === "failed" ? (admin ? g.error : "Natija tayyorlanmadi. Kredit hisobingizga qaytarildi.") : null,
     ...(admin ? { userId: g.userId, costUsd: g.costUsd, rawError: g.error, attempts: g.attempts } : {}),
