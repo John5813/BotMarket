@@ -41,6 +41,16 @@ async function failGeneration(gen: Generation, reason: string) {
   });
 }
 
+/** Shablonning 1-kadri kabi kichik fayllar AI serveriga har generatsiyada qayta yuklanmasin */
+const assetCache = new Map<string, { url: string; at: number }>();
+async function uploadTemplateAsset(rel: string) {
+  const hit = assetCache.get(rel);
+  if (hit && Date.now() - hit.at < TEMPLATE_VIDEO_TTL_MS) return hit.url;
+  const url = await ai.uploadFile(rel);
+  assetCache.set(rel, { url, at: Date.now() });
+  return url;
+}
+
 async function ensureTemplateVideoUrl(t: Template) {
   if (!t.sourceVideoPath) return null;
   const fresh = t.sourceFalUrl && t.sourceFalUploadedAt && Date.now() - t.sourceFalUploadedAt.getTime() < TEMPLATE_VIDEO_TTL_MS;
@@ -62,7 +72,7 @@ async function finalize(gen: Generation, t: Template, results: StepResult[]) {
   if (!outputs.length) throw new Error("Natija fayli topilmadi");
   await db.update(generations).set({
     status: "succeeded", outputs, stepResults: results, finishedAt: new Date(), currentRequestId: null,
-    costUsd: estimateCostUsd(steps),
+    costUsd: estimateCostUsd(steps, t.sourceMeta?.durationSec),
   }).where(eq(generations.id, gen.id));
   await db.update(templates).set({ usageCount: sql`${templates.usageCount} + 1` }).where(eq(templates.id, t.id));
   log("tayyor", gen.id);
@@ -70,7 +80,9 @@ async function finalize(gen: Generation, t: Template, results: StepResult[]) {
 
 async function advance(gen: Generation) {
   const settings = await getSettings();
-  if (gen.startedAt && Date.now() - gen.startedAt.getTime() > settings.generationTimeoutMinutes * 60_000) {
+  // Juda qisqa muddat — AI hali ishlayotgan (va pul yechiladigan) ishni bekor qilib, kreditni qaytarib yuboradi
+  const timeoutMin = Math.max(settings.generationTimeoutMinutes, 30);
+  if (gen.startedAt && Date.now() - gen.startedAt.getTime() > timeoutMin * 60_000) {
     return failGeneration(gen, "Vaqt tugadi: AI javob bermadi");
   }
   const [t] = gen.templateId ? await db.select().from(templates).where(eq(templates.id, gen.templateId)) : [];
@@ -99,8 +111,20 @@ async function advance(gen: Generation) {
   // 2) Qadam hali yuborilmagan bo'lsa — yuboramiz
   if (!gen.currentRequestId) {
     const templateVideo = usesTemplateVideo([step]) ? await ensureTemplateVideoUrl(t) : null;
-    const templateFrame = usesTemplateFrame([step]) && t.posterPath ? await ai.uploadFile(t.posterPath) : null;
-    const input = resolveInput(step.input, {
+    // 1-kadr alohida saqlanadi (eski shablonlarda — muqova rasm)
+    const frameRel = t.framePath || t.posterPath;
+    const templateFrame = usesTemplateFrame([step]) && frameRel ? await uploadTemplateAsset(frameRel) : null;
+    // Qayta urinishda Motion Control yuz elementisiz yuboriladi: ba'zi rasmlarda (yon tomondan, ko'zoynak,
+    // hayvon) yuz elementi rad etiladi — bunda 1-kadrdagi yuz baribir saqlanadi
+    let stepInput = step.input;
+    if (gen.attempts > 0 && /motion-control/.test(step.endpoint) && Array.isArray(stepInput.elements)) {
+      const { elements: _drop, ...rest } = stepInput;
+      stepInput = {
+        ...rest,
+        prompt: typeof rest.prompt === "string" ? rest.prompt.replace(/@Element1's/g, "the person's").replace(/@Element1/g, "The person") : rest.prompt,
+      };
+    }
+    const input = resolveInput(stepInput, {
       user_image: inputUrl, extra_images: extras.map((x) => x.falUrl!), template_video: templateVideo, template_frame: templateFrame, results,
     }) as Record<string, unknown>;
     const isVideoPreview = t.previewPath && /\.(mp4|webm|mov)$/i.test(t.previewPath);

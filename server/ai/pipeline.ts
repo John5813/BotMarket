@@ -1,4 +1,5 @@
 import type { PipelineStep, StepResult } from "@shared/schema";
+export { estimateCostUsd } from "@shared/recipe";
 
 export type PipelineVars = {
   user_image: string;
@@ -75,10 +76,6 @@ export function usesTemplateVideo(steps: PipelineStep[]) {
   return s.includes("{{template_video}}") || s.includes("{{template_image}}");
 }
 
-export function estimateCostUsd(steps: PipelineStep[]) {
-  return steps.reduce((s, x) => s + (Number(x.costUsd) || 0), 0);
-}
-
 /** Admin kiritgan qadamlarni tekshirish */
 export function validateSteps(steps: unknown): { ok: true; steps: PipelineStep[] } | { ok: false; error: string } {
   if (!Array.isArray(steps) || steps.length === 0) return { ok: false, error: "Kamida bitta qadam bo'lishi kerak" };
@@ -89,6 +86,9 @@ export function validateSteps(steps: unknown): { ok: true; steps: PipelineStep[]
     if (s.output !== "video" && s.output !== "image") return { ok: false, error: `${i + 1}-qadam: natija turi "video" yoki "image" bo'lishi kerak` };
     if (!s.input || typeof s.input !== "object" || Array.isArray(s.input)) return { ok: false, error: `${i + 1}-qadam: input obyekt bo'lishi kerak` };
     if (i === 0 && JSON.stringify(s.input).includes("{{prev}}")) return { ok: false, error: "1-qadamda {{prev}} ishlatib bo'lmaydi" };
+    for (const k of ["costUsd", "costPerSecUsd"] as const) {
+      if (s[k] !== undefined && (typeof s[k] !== "number" || !Number.isFinite(s[k]) || s[k] < 0)) return { ok: false, error: `${i + 1}-qadam: narx noto'g'ri` };
+    }
   }
   return { ok: true, steps: steps as PipelineStep[] };
 }

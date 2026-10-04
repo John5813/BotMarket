@@ -18,7 +18,7 @@ function Progress({ g }: { g: GenerationItem }) {
       </div>
       <div>
         <div className="text-lg font-semibold">{g.status === "queued" ? "Navbatda turibdi..." : STAGES[Math.min(g.stepIndex + 1, STAGES.length - 1)]}</div>
-        <div className="mt-1 text-sm text-white/50">Odatda 1–3 daqiqa. Sahifani yopsangiz ham ish davom etadi — natija "Ishlarim" bo'limida chiqadi.</div>
+        <div className="mt-1 text-sm text-white/50">Odatda 2–6 daqiqa (navbat ko'p bo'lsa uzoqroq). Sahifani yopsangiz ham ish davom etadi — natija "Ishlarim" bo'limida chiqadi.</div>
       </div>
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-gradient-to-r from-brand to-fuchsia-400 transition-all duration-700" style={{ width: `${pct}%` }} /></div>
     </div>

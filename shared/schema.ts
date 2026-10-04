@@ -31,19 +31,24 @@ export const categories = pgTable("categories", {
 /**
  * Shablon "retsepti": ketma-ket bajariladigan AI qadamlari.
  * Kirish qiymatlaridagi o'rinbosarlar:
- *   {{user_image}}      – mijoz yuklagan rasm URL'i
- *   {{template_video}}  – shablonning asl videosi URL'i
+ *   {{user_image}}      – mijoz yuklagan rasm URL'i ({{user_image_2}}, {{user_image_3}}... — qo'shimcha rasmlar)
+ *   {{template_video}}  – shablonning asl videosi (yoki rasmi) URL'i
+ *   {{template_frame}}  – asl videoning to'liq o'lchamdagi 1-kadri (Motion Control uchun)
  *   {{prev}}            – oldingi qadam natijasining URL'i
  *   {{step_N}}          – N-qadam natijasi (0 dan boshlanadi)
  */
 export type PipelineStep = {
   label?: string;
-  endpoint: string;                      // masalan: "fal-ai/wan/v2.2-14b/animate/replace"
+  endpoint: string;                      // masalan: "fal-ai/kling-video/v3/pro/motion-control"
   input: Record<string, unknown>;
   output: "video" | "image";
   final?: boolean;                       // natija mijozga ko'rsatiladimi (standart: oxirgi qadam)
-  costUsd?: number;                      // taxminiy tannarx (hisobot uchun)
+  costUsd?: number;                      // qat'iy tannarx, $ (masalan rasm tahriri)
+  costPerSecUsd?: number;                // video soniyasiga tannarx, $ (video modellari)
 };
+
+/** Asl video (yoki rasm) haqida brauzerda aniqlangan ma'lumot */
+export type SourceMeta = { width: number; height: number; durationSec: number };
 
 /**
  * Qo'shimcha variant (masalan arzon "Faqat yuz"). Asosiy variant — shablonning o'z steps/creditCost'i.
@@ -64,6 +69,9 @@ export const templates = pgTable("templates", {
   previewPath: text("preview_path"),        // kartochkada ko'rinadigan namuna (video yoki rasm)
   posterPath: text("poster_path"),          // video yuklanguncha ko'rinadigan rasm
   sourceVideoPath: text("source_video_path"), // qahramon almashtirish uchun asl video
+  /** Asl videoning to'liq o'lchamdagi 1-kadri ({{template_frame}}). Muqovadan alohida — muqovani almashtirish retseptni buzmaydi */
+  framePath: text("frame_path"),
+  sourceMeta: jsonb("source_meta").$type<SourceMeta | null>(),
   sourceFalUrl: text("source_fal_url"),
   sourceFalUploadedAt: timestamp("source_fal_uploaded_at", { withTimezone: true }),
   steps: jsonb("steps").$type<PipelineStep[]>().notNull().default([]),

@@ -104,3 +104,10 @@ function createMockProvider(): AiProvider {
 }
 
 export const ai: AiProvider = env.aiMode === "fal" && env.falKey ? createFalProvider() : createMockProvider();
+
+/**
+ * Mijozlar generatsiya qila oladimi. Production'da AI kaliti ulanmagan bo'lsa — yo'q:
+ * aks holda mijoz kredit to'laydi-yu, natija o'rniga namuna videoni oladi.
+ */
+export const generationEnabled = ai.name === "fal" || !env.isProd || env.allowMockAi;
+if (!generationEnabled) console.warn("⚠️  FAL_KEY ulanmagan: production'da mijozlar uchun generatsiya O'CHIRILDI (admin sinovi ishlaydi)");

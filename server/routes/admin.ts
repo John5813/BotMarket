@@ -7,11 +7,13 @@ import {
 } from "@shared/schema";
 import { requireAdmin, publicUser } from "../auth";
 import { consumeCredits, getBalance, grantCredits, InsufficientCreditsError } from "../credits";
-import { absPath, deleteFile, extFromMime, fileMime, IMAGE_MIMES, publicUrl, saveBuffer, VIDEO_MIMES } from "../files";
+import { absPath, deleteFile, extFromMime, fileMime, IMAGE_MIMES, looksLikeImage, publicUrl, saveBuffer, VIDEO_MIMES } from "../files";
 import { estimateCostUsd, maxUserImageIndex, usesTemplateFrame, usesTemplateVideo, validateSteps } from "../ai/pipeline";
+import { checkRecipe } from "@shared/recipe";
 import { getSettings, updateSettings, DEFAULT_SETTINGS } from "../settings";
 import { generationDto, HttpError, parse, slugify, upload } from "./helpers";
-import { ai } from "../ai/provider";
+import { ai, generationEnabled } from "../ai/provider";
+import { env } from "../env";
 import { analyzeTemplateMedia } from "../ai/analyze";
 
 export const adminRouter = Router();
@@ -47,8 +49,29 @@ adminRouter.get("/stats", async (_req, res) => {
       revenue: sql<number>`(select coalesce(sum(amount_uzs),0)::bigint from orders where status='paid' and paid_at >= date_trunc('day', now()))`,
     }).from(sql`(select 1) x`),
   ]);
+  // Sotuvga tayyorlik: nimalar sozlanmagan yoki xavfli holatda
+  const allTemplates = await db.select().from(templates);
+  const activeTemplates = allTemplates.filter((t) => t.isActive);
+  const broken = activeTemplates.filter((t) => templateChecks(t).errors.length > 0).map((t) => ({ id: t.id, title: t.title }));
+  const [{ activePlans }] = await db.select({ activePlans: sql<number>`count(*) filter (where is_active)::int` }).from(plans);
+  const launch = {
+    isProd: env.isProd,
+    aiReal: ai.name === "fal",
+    generationEnabled,
+    analysisReady: !!env.openrouter.key,
+    paymentsReady: env.payme.enabled || env.click.enabled,
+    paymeTestMode: env.payme.enabled && env.payme.testMode,
+    testPayments: env.testPayments,
+    paymeFiscal: !env.payme.enabled || !!(process.env.PAYME_IKPU_CODE && process.env.PAYME_PACKAGE_CODE),
+    httpsUrl: env.publicUrl.startsWith("https://"),
+    support: !!s.supportTelegram,
+    activePlans,
+    activeTemplates: activeTemplates.length,
+    brokenTemplates: broken,
+  };
+
   res.json({
-    users: u, generations: g, today,
+    users: u, generations: g, today, launch,
     revenue: { total: Number(rev.total), last30: Number(rev.last30) },
     aiCost: { last30Usd: cost.last30, last30Uzs: Math.round(cost.last30 * s.usdToUzs) },
     daily: daily.rows.map((r: any) => ({ day: r.day, revenue: Number(r.revenue), generations: Number(r.generations), users: Number(r.users) })),
@@ -97,13 +120,29 @@ adminRouter.delete("/categories/:id", async (req, res) => {
 // ---------------------------------------------------------------------------
 // Shablonlar
 // ---------------------------------------------------------------------------
+const extOf = (p?: string | null) => (p ? p.split(".").pop()!.toLowerCase() : null);
+
+function templateChecks(t: Pick<Template, "steps" | "variants" | "sourceVideoPath" | "sourceMeta" | "framePath" | "posterPath">) {
+  const src = { ext: extOf(t.sourceVideoPath), meta: t.sourceMeta, hasFrame: !!(t.framePath || t.posterPath) };
+  const main = checkRecipe(t.steps, src);
+  const vars = t.variants.map((v) => ({ label: v.label, ...checkRecipe(v.steps, src) }));
+  const uniq = (l: string[]) => [...new Set(l)];
+  return {
+    // Umumiy (video bo'yicha) ogohlantirishlar har bir variant uchun takrorlanmasin
+    errors: uniq([...main.errors, ...vars.flatMap((v) => v.errors.filter((e) => !main.errors.includes(e)).map((e) => `«${v.label}»: ${e}`))]),
+    warnings: uniq([...main.warnings, ...vars.flatMap((v) => v.warnings.filter((w) => !main.warnings.includes(w)).map((w) => `«${v.label}»: ${w}`))]),
+  };
+}
+
 function adminTemplateDto(t: Template) {
   return {
     ...t,
     previewUrl: publicUrl(t.previewPath), posterUrl: publicUrl(t.posterPath),
     sourceVideoUrl: t.sourceVideoPath ? `/api/admin/templates/${t.id}/source` : null,
     sourceIsVideo: !!t.sourceVideoPath && /\.(mp4|webm|mov)$/i.test(t.sourceVideoPath),
-    estimatedCostUsd: estimateCostUsd(t.steps),
+    frameUrl: t.framePath ? `/api/admin/templates/${t.id}/frame` : null,
+    estimatedCostUsd: estimateCostUsd(t.steps, t.sourceMeta?.durationSec),
+    checks: templateChecks(t),
   };
 }
 
@@ -133,10 +172,16 @@ const templateSchema = z.object({
   isNew: z.boolean().default(false),
   sortOrder: z.coerce.number().int().default(0),
   steps: z.unknown(),
+  /** Brauzerda aniqlangan asl media o'lchami va davomiyligi (retseptni tekshirish va tannarx uchun) */
+  sourceMeta: z.object({
+    width: z.number().int().min(1).max(10000),
+    height: z.number().int().min(1).max(10000),
+    durationSec: z.number().min(0).max(3600),
+  }).nullable().optional(),
 });
 
 const templateFiles = upload.fields([
-  { name: "preview", maxCount: 1 }, { name: "poster", maxCount: 1 }, { name: "sourceVideo", maxCount: 1 },
+  { name: "preview", maxCount: 1 }, { name: "poster", maxCount: 1 }, { name: "sourceVideo", maxCount: 1 }, { name: "frame", maxCount: 1 },
 ]);
 
 /** Forma multipart bo'lib keladi: "data" maydonida JSON, alohida fayllar */
@@ -159,33 +204,41 @@ async function saveTemplate(req: any, existing?: Template) {
     throw new HttpError(400, `Retsept {{user_image_${needImages}}} ishlatadi, lekin faqat ${slotCount} ta rasm joyi bor — "Mijozdan so'raladigan rasmlar" bo'limiga qo'shing`);
   }
 
+  // 1) Fayllarni tekshiramiz (hali saqlamaymiz — xato bo'lsa diskda keraksiz fayl qolmasin)
   const files = (req.files || {}) as Record<string, Express.Multer.File[]>;
-  const paths: Partial<Pick<Template, "previewPath" | "posterPath" | "sourceVideoPath">> = {};
   const preview = files.preview?.[0];
-  if (preview) {
-    if (![...IMAGE_MIMES, ...VIDEO_MIMES, "image/gif"].includes(fileMime(preview))) throw new HttpError(400, "Namuna video (MP4/WEBM) yoki rasm bo'lishi kerak");
-    paths.previewPath = await saveBuffer("public/templates", preview.buffer, extFromMime(fileMime(preview), "mp4"));
-  }
+  if (preview && ![...IMAGE_MIMES, ...VIDEO_MIMES, "image/gif"].includes(fileMime(preview))) throw new HttpError(400, "Namuna video (MP4/WEBM) yoki rasm bo'lishi kerak");
   const poster = files.poster?.[0];
-  if (poster) {
-    if (!IMAGE_MIMES.includes(fileMime(poster))) throw new HttpError(400, "Muqova rasm JPG/PNG/WEBP bo'lishi kerak");
-    paths.posterPath = await saveBuffer("public/templates", poster.buffer, extFromMime(fileMime(poster), "jpg"));
-  }
+  if (poster && !IMAGE_MIMES.includes(fileMime(poster))) throw new HttpError(400, "Muqova rasm JPG/PNG/WEBP bo'lishi kerak");
   const src = files.sourceVideo?.[0];
-  if (src) {
-    if (![...VIDEO_MIMES, ...IMAGE_MIMES].includes(fileMime(src))) throw new HttpError(400, "Asl media video (MP4/WEBM/MOV) yoki rasm (JPG/PNG/WEBP) bo'lishi kerak");
-    paths.sourceVideoPath = await saveBuffer("private/templates", src.buffer, extFromMime(fileMime(src), "mp4"));
-  }
+  if (src && ![...VIDEO_MIMES, ...IMAGE_MIMES].includes(fileMime(src))) throw new HttpError(400, "Asl media video (MP4/WEBM/MOV) yoki rasm (JPG/PNG/WEBP) bo'lishi kerak");
+  const frame = files.frame?.[0];
+  if (frame && (!IMAGE_MIMES.includes(fileMime(frame)) || !looksLikeImage(frame.buffer))) throw new HttpError(400, "1-kadr JPG/PNG/WEBP rasm bo'lishi kerak");
+  if (b.isActive && !preview && !existing?.previewPath) throw new HttpError(400, "Faol qilishdan oldin namuna video yoki rasm yuklang");
 
-  if (usesTemplateFrame(allSteps) && !paths.posterPath && !existing?.posterPath) {
-    throw new HttpError(400, "Retsept {{template_frame}} (videoning 1-kadri) ishlatadi — muqova rasmni yuklang");
+  // 2) Retseptni asl media bilan tekshiramiz. Asl video almashsa — eski 1-kadr va o'lchamlar endi to'g'ri emas
+  const sourceExt = src ? extFromMime(fileMime(src), "mp4") : extOf(existing?.sourceVideoPath);
+  const sourceMeta = src ? b.sourceMeta ?? null : b.sourceMeta ?? existing?.sourceMeta ?? null;
+  // Eski shablonlarda 1-kadr alohida yo'q — muqova ishlatiladi
+  const hasFrame = !!frame || (!src && !!(existing?.framePath || poster || existing?.posterPath));
+  if (usesTemplateFrame(allSteps) && !hasFrame) {
+    throw new HttpError(400, "Retsept {{template_frame}} (videoning 1-kadri) ishlatadi — asl videoni qayta tanlang, 1-kadr avtomatik olinadi");
   }
-  if (usesTemplateVideo(allSteps) && !paths.sourceVideoPath && !existing?.sourceVideoPath) {
+  if (usesTemplateVideo(allSteps) && !src && !existing?.sourceVideoPath) {
     throw new HttpError(400, "Bu retsept shablonning asl mediasini ishlatadi — asl video yoki rasmni yuklang");
   }
-  if (b.isActive && !paths.previewPath && !existing?.previewPath) {
-    throw new HttpError(400, "Faol qilishdan oldin namuna video yoki rasm yuklang");
-  }
+  const check = templateChecks({
+    steps: steps.steps, variants, sourceVideoPath: sourceExt ? `x.${sourceExt}` : null, sourceMeta, framePath: hasFrame ? "x" : null, posterPath: null,
+  });
+  if (check.errors.length) throw new HttpError(400, check.errors[0]);
+
+  // 3) Saqlash
+  const paths: Partial<Pick<Template, "previewPath" | "posterPath" | "sourceVideoPath" | "framePath">> = {};
+  if (preview) paths.previewPath = await saveBuffer("public/templates", preview.buffer, extFromMime(fileMime(preview), "mp4"));
+  if (poster) paths.posterPath = await saveBuffer("public/templates", poster.buffer, extFromMime(fileMime(poster), "jpg"));
+  if (src) paths.sourceVideoPath = await saveBuffer("private/templates", src.buffer, sourceExt || "mp4");
+  if (frame) paths.framePath = await saveBuffer("private/templates", frame.buffer, extFromMime(fileMime(frame), "jpg"));
+  else if (src) paths.framePath = null;
 
   let slug = slugify(b.slug || b.title);
   const [clash] = await db.select({ id: templates.id }).from(templates).where(eq(templates.slug, slug));
@@ -196,6 +249,7 @@ async function saveTemplate(req: any, existing?: Template) {
     creditCost: b.creditCost, allowAnimals: b.allowAnimals, inputHint: b.inputHint,
     isActive: b.isActive, isFeatured: b.isFeatured, isNew: b.isNew, sortOrder: b.sortOrder,
     steps: steps.steps, variants, mainLabel: b.mainLabel || "Butun personaj", inputSlots: b.inputSlots.length > 1 ? b.inputSlots : b.inputSlots.slice(0, 1), updatedAt: new Date(), ...paths,
+    sourceMeta,
     ...(paths.sourceVideoPath ? { sourceFalUrl: null, sourceFalUploadedAt: null } : {}),
   };
   if (existing) {
@@ -204,6 +258,7 @@ async function saveTemplate(req: any, existing?: Template) {
     if (paths.previewPath) await deleteFile(existing.previewPath);
     if (paths.posterPath) await deleteFile(existing.posterPath);
     if (paths.sourceVideoPath) await deleteFile(existing.sourceVideoPath);
+    if (paths.framePath !== undefined && existing.framePath !== paths.framePath) await deleteFile(existing.framePath);
     return t;
   }
   const [t] = await db.insert(templates).values(values).returning();
@@ -227,6 +282,12 @@ adminRouter.get("/templates/:id/source", async (req, res) => {
   res.sendFile(absPath(t.sourceVideoPath));
 });
 
+adminRouter.get("/templates/:id/frame", async (req, res) => {
+  const [t] = await db.select().from(templates).where(eq(templates.id, Number(req.params.id)));
+  if (!t?.framePath) throw new HttpError(404, "Topilmadi");
+  res.sendFile(absPath(t.framePath));
+});
+
 adminRouter.post("/templates", templateFiles, async (req, res) => {
   res.status(201).json(adminTemplateDto(await saveTemplate(req)));
 });
@@ -245,12 +306,18 @@ adminRouter.patch("/templates/:id", async (req, res) => {
     await db.update(templates).set({ isActive: false }).where(eq(templates.id, t.id));
     throw new HttpError(400, "Namuna video yuklanmagan shablonni faol qilib bo'lmaydi");
   }
+  // Retseptda xato bo'lsa (masalan eski shablon WEBM video bilan) — mijozlarga ochmaymiz
+  const errs = b.isActive ? templateChecks(t).errors : [];
+  if (errs.length) {
+    await db.update(templates).set({ isActive: false }).where(eq(templates.id, t.id));
+    throw new HttpError(400, `Faol qilib bo'lmaydi: ${errs[0]}`);
+  }
   res.json(adminTemplateDto(t));
 });
 
 adminRouter.delete("/templates/:id", async (req, res) => {
   const [t] = await db.delete(templates).where(eq(templates.id, Number(req.params.id))).returning();
-  if (t) { await deleteFile(t.previewPath); await deleteFile(t.posterPath); await deleteFile(t.sourceVideoPath); }
+  if (t) { await deleteFile(t.previewPath); await deleteFile(t.posterPath); await deleteFile(t.sourceVideoPath); await deleteFile(t.framePath); }
   res.json({ ok: true });
 });
 

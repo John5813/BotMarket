@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { PawPrint, Zap } from "lucide-react";
-import type { TemplateCard as T } from "@/lib/api";
+import { minCredits, type TemplateCard as T } from "@/lib/api";
 import { clsx } from "./ui";
 
 /** Ko'rinish maydoniga kirganda o'z-o'zidan ijro etiladigan video */
@@ -43,7 +43,7 @@ export function TemplateCard({ t, size = "md" }: { t: T; size?: "md" | "lg" }) {
         {t.allowAnimals && <span className="rounded-full bg-black/50 p-1 backdrop-blur" title="Hayvon rasmi ham mumkin"><PawPrint className="h-3 w-3" /></span>}
       </div>
       <div className="absolute right-2 top-2 flex items-center gap-0.5 rounded-full bg-black/55 px-2 py-0.5 text-[11px] font-semibold backdrop-blur">
-        <Zap className="h-3 w-3 fill-amber-300 text-amber-300" />{t.variants?.length ? `${Math.min(...t.variants.map((v) => v.creditCost))}+` : t.creditCost}
+        <Zap className="h-3 w-3 fill-amber-300 text-amber-300" />{t.variants?.length ? `${minCredits(t)}+` : t.creditCost}
       </div>
       <div className="absolute inset-x-0 bottom-0 p-3">
         <div className="line-clamp-2 text-center text-sm font-bold leading-tight drop-shadow">{t.title}</div>

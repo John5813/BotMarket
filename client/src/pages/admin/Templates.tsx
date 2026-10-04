@@ -2,21 +2,25 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, Save, FlaskConical, Info, Zap, Upload, ChevronLeft, Copy, Sparkles } from "lucide-react";
-import { PIPELINE_PRESETS, KIND_LABELS, FACE_SWAP_VARIANT, MAIN_VARIANT_LABEL } from "@shared/presets";
-import type { InputSlot, PipelineStep, TemplateVariant } from "@shared/schema";
+import { PIPELINE_PRESETS, KIND_LABELS, FACE_SWAP_VARIANT, MAIN_VARIANT_LABEL, buildMotionControlSteps } from "@shared/presets";
+import { checkRecipe, estimateCostUsd, nearestAspectRatio, recommendedCredits } from "@shared/recipe";
+import type { InputSlot, PipelineStep, SourceMeta, TemplateVariant } from "@shared/schema";
 import { api, formatUzs, queryClient } from "@/lib/api";
 import { Badge, Button, Card, Empty, Modal, NumInput, PageLoader, Toggle, clsx, useToast } from "@/components/ui";
 import { PageHead } from "./AdminLayout";
 import { MediaWizard, type WizardResult } from "./MediaWizard";
+import { extOfFile, formatMeta, probeMedia, dataUrlToFile } from "./media";
 
 type AdminTemplate = {
   id: number; slug: string; title: string; description: string; categoryId: number | null; kind: keyof typeof KIND_LABELS | string;
   previewUrl: string | null; posterUrl: string | null; sourceVideoUrl: string | null; sourceIsVideo?: boolean; sourceVideoPath?: string | null; previewPath: string | null;
-  steps: PipelineStep[]; inputSlots: InputSlot[]; mainLabel: string; variants: TemplateVariant[]; creditCost: number; allowAnimals: boolean; inputHint: string; isActive: boolean; isFeatured: boolean;
+  steps: PipelineStep[]; inputSlots: InputSlot[]; mainLabel: string; variants: TemplateVariant[]; creditCost: number;
+  sourceMeta: SourceMeta | null; frameUrl?: string | null; checks?: { errors: string[]; warnings: string[] }; allowAnimals: boolean; inputHint: string; isActive: boolean; isFeatured: boolean;
   isNew: boolean; sortOrder: number; usageCount: number; estimatedCostUsd: number;
 };
 type Category = { id: number; title: string; emoji: string };
 type Settings = { values: { usdToUzs: number } };
+type PlanLite = { id: number; credits: number; priceUzs: number; isActive: boolean };
 
 const isVideoUrl = (u?: string | null) => !!u && /\.(mp4|webm|mov)(\?|$)/i.test(u);
 
@@ -100,10 +104,10 @@ export function AdminTemplates() {
 // ---------------------------------------------------------------------------
 // Muharrir
 // ---------------------------------------------------------------------------
-type Form = Omit<AdminTemplate, "id" | "previewUrl" | "posterUrl" | "sourceVideoUrl" | "previewPath" | "usageCount" | "estimatedCostUsd">;
+type Form = Omit<AdminTemplate, "id" | "previewUrl" | "posterUrl" | "sourceVideoUrl" | "previewPath" | "usageCount" | "estimatedCostUsd" | "frameUrl" | "checks">;
 const EMPTY: Form = {
   title: "", slug: "", description: "", categoryId: null, kind: "effect", steps: PIPELINE_PRESETS.effect.steps,
-  inputSlots: [], mainLabel: MAIN_VARIANT_LABEL, variants: [], creditCost: 1, allowAnimals: false, inputHint: "", isActive: false, isFeatured: false, isNew: true, sortOrder: 0,
+  inputSlots: [], mainLabel: MAIN_VARIANT_LABEL, variants: [], sourceMeta: null, creditCost: 1, allowAnimals: false, inputHint: "", isActive: false, isFeatured: false, isNew: true, sortOrder: 0,
 };
 
 function FilePick({ label, accept, current, file, onFile, hint, forceVideo }: { label: string; accept: string; current: string | null; file: File | null; onFile: (f: File | null) => void; hint?: string; forceVideo?: boolean }) {
@@ -175,11 +179,12 @@ function StepEditor({ steps, onChange }: { steps: PipelineStep[]; onChange: (s: 
               <button type="button" onClick={() => { onChange(steps.filter((_, k) => k !== i)); setDrafts(drafts.filter((_, k) => k !== i)); }} className="rounded p-1 text-white/50 hover:bg-red-500/10 hover:text-red-300" aria-label="O'chirish"><Trash2 className="h-4 w-4" /></button>
             </div>
           </div>
-          <div className="grid gap-3 sm:grid-cols-[1fr_120px_110px]">
+          <div className="grid gap-3 sm:grid-cols-[1fr_110px_95px_95px]">
             <div><div className="label">Model (fal.ai endpoint)</div><input className="input font-mono text-xs" value={s.endpoint} onChange={(e) => update(i, { endpoint: e.target.value.trim() })} /></div>
             <div><div className="label">Natija</div>
               <select className="input" value={s.output} onChange={(e) => update(i, { output: e.target.value as "video" | "image" })}><option value="video">Video</option><option value="image">Rasm</option></select></div>
-            <div><div className="label">Narxi ($)</div><NumInput decimal value={s.costUsd ?? 0} onChange={(n) => update(i, { costUsd: n })} /></div>
+            <div><div className="label" title="Qat'iy narx (masalan rasm tahriri)">Narx, $</div><NumInput decimal value={s.costUsd ?? 0} onChange={(n) => update(i, { costUsd: n || undefined })} /></div>
+            <div><div className="label" title="Video modellari soniyasiga narxlanadi">$ / soniya</div><NumInput decimal value={s.costPerSecUsd ?? 0} onChange={(n) => update(i, { costPerSecUsd: n || undefined })} /></div>
           </div>
           <div className="mt-3">
             <div className="label">Kirish parametrlari (JSON)</div>
@@ -191,7 +196,7 @@ function StepEditor({ steps, onChange }: { steps: PipelineStep[]; onChange: (s: 
         </div>
       ))}
       <div className="flex flex-wrap gap-2">
-        <Button type="button" size="sm" variant="secondary" onClick={() => { onChange([...steps, { label: "Yangi qadam", endpoint: "fal-ai/nano-banana/edit", input: { prompt: "", image_urls: ["{{user_image}}"] }, output: "image", costUsd: 0.04 }]); }}>
+        <Button type="button" size="sm" variant="secondary" onClick={() => { onChange([...steps, { label: "Yangi qadam", endpoint: "fal-ai/nano-banana-2/edit", input: { prompt: "", image_urls: ["{{user_image}}"] }, output: "image", costUsd: 0.08 }]); }}>
           <Plus className="h-4 w-4" />Qadam qo'shish</Button>
         <Button type="button" size="sm" variant="ghost" onClick={() => { setRawText(JSON.stringify(steps, null, 2)); setRaw(true); }}>JSON ko'rinishida tahrirlash</Button>
       </div>
@@ -236,7 +241,9 @@ export function AdminTemplateEditor() {
   const { data: cats } = useQuery<Category[]>({ queryKey: ["/api/admin/categories"] });
   const { data: settings } = useQuery<Settings>({ queryKey: ["/api/admin/settings"] });
   const [f, setF] = useState<Form>(EMPTY);
-  const [files, setFiles] = useState<{ preview: File | null; poster: File | null; sourceVideo: File | null }>({ preview: null, poster: null, sourceVideo: null });
+  const { data: plans } = useQuery<PlanLite[]>({ queryKey: ["/api/admin/plans"] });
+  const [files, setFiles] = useState<{ preview: File | null; poster: File | null; sourceVideo: File | null; frame: File | null }>({ preview: null, poster: null, sourceVideo: null, frame: null });
+  const [framePreview, setFramePreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [testOpen, setTestOpen] = useState(false);
   const [testFile, setTestFile] = useState<File | null>(null);
@@ -246,31 +253,76 @@ export function AdminTemplateEditor() {
 
   useEffect(() => {
     if (existing) {
-      const { id: _i, previewUrl: _p, posterUrl: _po, sourceVideoUrl: _s, sourceIsVideo: _sv, previewPath: _pp, usageCount: _u, estimatedCostUsd: _e, ...rest } = existing;
-      setF(rest as Form);
+      const { id: _i, previewUrl: _p, posterUrl: _po, sourceVideoUrl: _s, sourceIsVideo: _sv, previewPath: _pp, usageCount: _u, estimatedCostUsd: _e, frameUrl: _fu, checks: _c, ...rest } = existing;
+      setF({ ...(rest as Form), sourceMeta: existing.sourceMeta ?? null });
     }
   }, [existing]);
 
   if (!isNew && isLoading) return <PageLoader />;
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((s) => ({ ...s, [k]: v }));
   const needsVideo = /\{\{template_(video|image)\}\}/.test(JSON.stringify(f.steps));
-  const costUsd = f.steps.reduce((s, x) => s + (Number(x.costUsd) || 0), 0);
-  const costUzs = Math.round(costUsd * (settings?.values.usdToUzs || 12500));
+  const usdToUzs = settings?.values.usdToUzs || 12500;
+  const duration = f.sourceMeta?.durationSec || null;
+  const costUsd = estimateCostUsd(f.steps, duration);
+  // Eng arzon tarifdagi 1 kredit narxi — eng yomon holatdagi tushum
+  const activePlans = (plans || []).filter((p) => p.isActive && p.credits > 0);
+  const minCreditUzs = activePlans.length ? Math.min(...activePlans.map((p) => p.priceUzs / p.credits)) : 0;
+  /** Retsept uchun tavsiya etilgan kredit (tariflar yuklanmagan bo'lsa — fallback) */
+  const recFor = (steps: PipelineStep[], meta: SourceMeta | null, fallback: number) =>
+    minCreditUzs ? recommendedCredits(estimateCostUsd(steps, meta?.durationSec), usdToUzs, minCreditUzs) : fallback;
+  const marginOf = (credits: number, usd: number) => (minCreditUzs && credits > 0 ? 1 - (usd * usdToUzs) / (credits * minCreditUzs) : null);
+  const sourceExt = files.sourceVideo ? extOfFile(files.sourceVideo) : existing?.sourceVideoPath?.split(".").pop()?.toLowerCase() || null;
+  const hasFrame = !!files.frame || (!files.sourceVideo && !!(existing?.frameUrl || existing?.posterUrl || files.poster));
+  const live = (() => {
+    const src = { ext: sourceExt, meta: f.sourceMeta, hasFrame };
+    const main = checkRecipe(f.steps, src);
+    const vs = f.variants.map((v) => ({ label: v.label, ...checkRecipe(v.steps, src) }));
+    const errors = [...main.errors, ...vs.flatMap((v) => v.errors.filter((e) => !main.errors.includes(e)).map((e) => `«${v.label}»: ${e}`))];
+    const warnings = [...main.warnings, ...vs.flatMap((v) => v.warnings.filter((w) => !main.warnings.includes(w)).map((w) => `«${v.label}»: ${w}`))];
+    if (f.allowAnimals && JSON.stringify([f.steps, f.variants]).includes('"elements"')) {
+      warnings.push("Retseptda mijoz yuzini bog'lash (elements) bor — hayvon rasmi bilan xato berishi mumkin. Hayvonlar uchun Wan retseptini ishlating yoki \"elements\"ni olib tashlang");
+    }
+    return { errors: [...new Set(errors)], warnings: [...new Set(warnings)] };
+  })();
+
+  /** Asl video tanlanganda: 1-kadr va o'lcham/davomiylik brauzerda aniqlanadi */
+  async function onSourcePicked(file: File | null) {
+    setFiles((s) => ({ ...s, sourceVideo: file, frame: null }));
+    setFramePreview(null);
+    if (!file) return;
+    try {
+      const r = await probeMedia(file, { analysisFrames: false });
+      const frame = r.firstFull ? await dataUrlToFile(r.firstFull, "frame.jpg") : null;
+      setFiles((s) => ({ ...s, frame }));
+      setFramePreview(r.firstFull);
+      setF((s) => ({ ...s, sourceMeta: r.meta }));
+    } catch {
+      toast("Videoni o'qib bo'lmadi — MP4 formatida yuklab ko'ring", "error");
+      setF((s) => ({ ...s, sourceMeta: null }));
+    }
+  }
 
   function applyWizard(r: WizardResult) {
-    setFiles((s) => ({ ...s, preview: r.file, sourceVideo: r.file, poster: r.poster ?? s.poster }));
+    setFiles((s) => ({ ...s, preview: r.file, sourceVideo: r.file, poster: r.poster ?? s.poster, frame: r.frame }));
+    setFramePreview(null);
+    if (r.frame) { const u = URL.createObjectURL(r.frame); setFramePreview(u); }
+    setF((s) => ({ ...s, sourceMeta: r.meta }));
     if (r.fill) {
       const fill = r.fill;
       setF((s) => ({
         ...s,
         title: fill.title || s.title, description: fill.description || s.description, inputHint: fill.inputHint || s.inputHint,
         allowAnimals: fill.allowAnimals, kind: fill.kind, steps: fill.steps, inputSlots: fill.inputSlots,
-        mainLabel: fill.mainLabel || s.mainLabel, variants: fill.variants ?? (fill.kind === "multi_character" ? [] : s.variants),
-        creditCost: fill.kind === "multi_character" ? Math.max(s.creditCost, 4) : fill.variants?.length ? Math.max(s.creditCost, 2) : s.creditCost,
+        mainLabel: fill.mainLabel || s.mainLabel,
+        variants: (fill.variants ?? (fill.kind === "multi_character" ? [] : s.variants)).map((v) => ({ ...v, creditCost: recFor(v.steps, r.meta, v.creditCost) })),
+        creditCost: recFor(fill.steps, r.meta, fill.kind === "multi_character" ? 4 : 3),
       }));
     } else if (r.mediaType === "video" && isNew) {
-      setF((s) => ({ ...s, kind: "motion_control", allowAnimals: false, steps: structuredClone(PIPELINE_PRESETS.motion_control.steps),
-        mainLabel: MAIN_VARIANT_LABEL, variants: [structuredClone(FACE_SWAP_VARIANT)], creditCost: Math.max(s.creditCost, 2) }));
+      const aspectRatio = r.meta ? nearestAspectRatio(r.meta.width, r.meta.height) : undefined;
+      const steps = buildMotionControlSteps({ aspectRatio });
+      setF((s) => ({ ...s, kind: "motion_control", allowAnimals: false, steps,
+        mainLabel: MAIN_VARIANT_LABEL, variants: [{ ...structuredClone(FACE_SWAP_VARIANT), creditCost: recFor(FACE_SWAP_VARIANT.steps, r.meta, 1) }],
+        creditCost: recFor(steps, r.meta, 3) }));
     }
     setWizard(false);
     toast(r.fill?.title ? "AI taklifi formaga qo'llandi — tekshirib, saqlang" : "Media qo'shildi — ma'lumotlarni kiriting");
@@ -280,11 +332,13 @@ export function AdminTemplateEditor() {
     set("kind", kind);
     const preset = PIPELINE_PRESETS[kind as keyof typeof PIPELINE_PRESETS];
     if (preset && (isNew || confirm(`"${preset.title}" andozasi qadamlarini qo'llaymi? Hozirgi qadamlar almashtiriladi.`))) {
-      set("steps", JSON.parse(JSON.stringify(preset.steps)));
+      const aspectRatio = f.sourceMeta ? nearestAspectRatio(f.sourceMeta.width, f.sourceMeta.height) : undefined;
+      const steps = kind === "motion_control" ? buildMotionControlSteps({ aspectRatio }) : structuredClone(preset.steps);
+      setF((s) => ({ ...s, steps, creditCost: recFor(steps, s.sourceMeta, s.creditCost) }));
       if (kind === "character_replace") set("allowAnimals", true);
-      if (kind === "motion_control") setF((s) => ({ ...s, creditCost: Math.max(s.creditCost, 2) }));
+      if (kind === "motion_control") set("allowAnimals", false);
       if (kind === "multi_character") {
-        setF((s) => ({ ...s, creditCost: Math.max(s.creditCost, 4), variants: [],
+        setF((s) => ({ ...s, variants: [],
           inputSlots: s.inputSlots.length >= 2 ? s.inputSlots : [{ label: "1-personaj" }, { label: "2-personaj" }] }));
       }
     }
@@ -296,13 +350,14 @@ export function AdminTemplateEditor() {
     if (files.preview) form.append("preview", files.preview);
     if (files.poster) form.append("poster", files.poster);
     if (files.sourceVideo) form.append("sourceVideo", files.sourceVideo);
+    if (files.frame) form.append("frame", files.frame);
     setSaving(true);
     try {
       const t = await api<AdminTemplate>(isNew ? "/api/admin/templates" : `/api/admin/templates/${id}`, { method: isNew ? "POST" : "PUT", form });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/templates"] });
       queryClient.invalidateQueries({ queryKey: [`/api/admin/templates/${t.id}`] });
       queryClient.invalidateQueries({ queryKey: ["/api/catalog"] });
-      setFiles({ preview: null, poster: null, sourceVideo: null });
+      setFiles({ preview: null, poster: null, sourceVideo: null, frame: null });
       toast("Saqlandi");
       if (isNew) navigate(`/admin/templates/${t.id}`);
     } catch (e) { toast((e as Error).message, "error"); }
@@ -330,16 +385,30 @@ export function AdminTemplateEditor() {
   function toggleFace(on: boolean) {
     setF((s) => ({
       ...s,
-      variants: on ? [...s.variants, structuredClone(FACE_SWAP_VARIANT)] : s.variants.filter((v) => v.key !== FACE_SWAP_VARIANT.key),
-      creditCost: on ? Math.max(s.creditCost, 2) : s.creditCost,
+      variants: on
+        ? [...s.variants, { ...structuredClone(FACE_SWAP_VARIANT), creditCost: recFor(FACE_SWAP_VARIANT.steps, s.sourceMeta, 1) }]
+        : s.variants.filter((v) => v.key !== FACE_SWAP_VARIANT.key),
     }));
   }
   const setVariant = (i: number, patch: Partial<TemplateVariant>) =>
     setF((s) => ({ ...s, variants: s.variants.map((v, k) => (k === i ? { ...v, ...patch } : v)) }));
-  const variantCost = (v: TemplateVariant) => v.steps.reduce((a, x) => a + (Number(x.costUsd) || 0), 0);
-  const klingO1 = JSON.stringify(f.steps).includes("kling-video/o1");
-  const sourceNotMp4 = files.sourceVideo ? !/^video\/(mp4|quicktime)$/.test(files.sourceVideo.type)
-    : !!existing?.sourceVideoUrl && !!existing.sourceIsVideo && !/\.(mp4|mov)$/i.test(existing.sourceVideoPath || "");
+  const variantCost = (v: TemplateVariant) => estimateCostUsd(v.steps, duration);
+  const frameShown = framePreview || (!files.sourceVideo ? existing?.frameUrl : null);
+  const needsFrame = /template_frame/.test(JSON.stringify([f.steps, f.variants]));
+
+  /** Bitta narx qatori: tannarx, mijoz to'laydigan kredit, foyda va tavsiya */
+  function economyRow(key: string, label: string, usd: number, credits: number) {
+    const margin = marginOf(credits, usd);
+    const rec = recommendedCredits(usd, usdToUzs, minCreditUzs);
+    return (
+      <div key={key} className="border-t border-white/5 py-2 first:border-0 first:pt-0">
+        <div className="flex justify-between gap-2"><span className="text-white/60">{label}</span><b>{credits} kredit</b></div>
+        <div className="flex justify-between gap-2 text-xs text-white/50"><span>Tannarx ${usd.toFixed(2)} ≈ {formatUzs(Math.round(usd * usdToUzs))}</span>
+          {margin !== null && <span className={margin < 0.2 ? "text-red-300" : margin < 0.45 ? "text-amber-200" : "text-emerald-300"}>foyda {Math.round(margin * 100)}%</span>}</div>
+        {margin !== null && credits < rec && <div className="mt-1 text-xs text-amber-200">Tavsiya: kamida {rec} kredit (eng arzon tarifda ham zarar bo'lmasligi uchun)</div>}
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-5xl">
@@ -379,8 +448,12 @@ export function AdminTemplateEditor() {
               </select>
             </div>
             {preset && <p className="mb-4 rounded-xl bg-brand/10 p-3 text-sm text-white/70">{preset.description}</p>}
-            {klingO1 && sourceNotMp4 && (
-              <p className="mb-4 rounded-xl bg-red-500/10 p-3 text-sm text-red-200">Kling O1 faqat MP4 yoki MOV videoni qabul qiladi (3–10 soniya, 720p+). Asl videoni MP4 formatida yuklang.</p>
+            {(live.errors.length > 0 || live.warnings.length > 0) && (
+              <div className="mb-4 space-y-1 rounded-xl border border-line p-3 text-sm">
+                {live.errors.map((e) => <div key={e} className="text-red-300">✕ {e}</div>)}
+                {live.warnings.map((w) => <div key={w} className="text-amber-200">! {w}</div>)}
+                {live.errors.length > 0 && <div className="pt-1 text-xs text-white/40">Xatolar tuzatilmaguncha shablon saqlanmaydi — aks holda mijoz puli AI xatosiga ketadi.</div>}
+              </div>
             )}
             <StepEditor steps={f.steps} onChange={(s) => set("steps", s)} />
             <details className="mt-4 rounded-xl bg-white/5 p-3 text-sm text-white/60">
@@ -421,7 +494,7 @@ export function AdminTemplateEditor() {
                     </div>
                     <div><label className="label">Izoh (mijozga)</label><input className="input" value={v.hint ?? ""} maxLength={120} onChange={(e) => setVariant(i, { hint: e.target.value })} /></div>
                     <StepEditor steps={v.steps} onChange={(st) => setVariant(i, { steps: st })} />
-                    <p className="text-xs text-white/40">Tannarx: ${variantCost(v).toFixed(2)}. Parametr nomlarini (source_face_url, target_video_url) fal.ai sahifasida tekshiring.</p>
+                    <p className="text-xs text-white/40">Tannarx: ${variantCost(v).toFixed(2)}{duration ? ` (${duration.toFixed(1)} s video uchun)` : " (5 s video uchun)"}.</p>
                   </div>
                 ))}
               </div>
@@ -443,18 +516,26 @@ export function AdminTemplateEditor() {
             <FilePick label="Muqova rasm (ixtiyoriy)" accept="image/jpeg,image/png,image/webp" current={existing?.posterUrl ?? null} file={files.poster}
               onFile={(x) => setFiles((s) => ({ ...s, poster: x }))} hint={/\{\{template_frame\}\}/.test(JSON.stringify(f.steps)) ? "Motion Control uchun shart: videoning 1-kadri (AI tahlil avtomatik qo'yadi)" : "Video yuklanguncha ko'rinadi"} />
             {(needsVideo || existing?.sourceVideoUrl) && (
-              <FilePick label={`Asl media (video yoki rasm)${needsVideo ? " *" : ""}`} accept="video/mp4,video/webm,video/quicktime,image/jpeg,image/png,image/webp" current={existing?.sourceVideoUrl ?? null} file={files.sourceVideo}
-                forceVideo={existing?.sourceIsVideo} onFile={(x) => setFiles((s) => ({ ...s, sourceVideo: x }))} hint="Bitta raqqos, butun gavda, kamera qimirlamaydi. Mijozlarga ko'rinmaydi" />
+              <div>
+                <FilePick label={`Asl media (video yoki rasm)${needsVideo ? " *" : ""}`} accept="video/mp4,video/quicktime,video/webm,image/jpeg,image/png,image/webp" current={existing?.sourceVideoUrl ?? null} file={files.sourceVideo}
+                  forceVideo={existing?.sourceIsVideo} onFile={onSourcePicked} hint="MP4, 5–10 soniya, 720p+, bitta uzluksiz kadr. Mijozlarga ko'rinmaydi" />
+                {f.sourceMeta && <div className="mt-2 text-xs text-white/50">{(sourceExt || "").toUpperCase()} · {formatMeta(f.sourceMeta)}</div>}
+              </div>
+            )}
+            {needsFrame && (
+              <FilePick label="Videoning 1-kadri (Motion Control)" accept="image/jpeg,image/png,image/webp" current={frameShown ?? null} file={files.frame}
+                onFile={(x) => { setFiles((s) => ({ ...s, frame: x })); setFramePreview(null); }}
+                hint={frameShown || files.frame ? "Asl videodan avtomatik olindi" : "Brauzer videoni o'qiy olmadi — videoning eng birinchi kadrini rasm qilib yuklang"} />
             )}
           </Card>
           <Card className="p-5 text-sm">
-            <div className="label">Iqtisodiyot</div>
-            <div className="flex justify-between"><span className="text-white/60">AI tannarxi</span><b>${costUsd.toFixed(2)} ≈ {formatUzs(costUzs)}</b></div>
-            <div className="mt-1 flex justify-between"><span className="text-white/60">Mijoz to'laydi</span><b>{f.creditCost} kredit</b></div>
-            {f.variants.map((v) => (
-              <div key={v.key} className="mt-1 flex justify-between"><span className="text-white/60">«{v.label}»</span><b>${variantCost(v).toFixed(2)} · {v.creditCost} kredit</b></div>
-            ))}
-            <p className="mt-2 text-xs text-white/40">1 kredit narxi tarifga qarab ~10 000–15 000 so'm. Tannarx kredit narxining 50% idan oshmasligi tavsiya etiladi.</p>
+            <div className="label">Iqtisodiyot{duration ? ` · ${duration.toFixed(1)} s video` : ""}</div>
+            {economyRow("main", f.variants.length ? `«${f.mainLabel}»` : "Mijoz to'laydi", costUsd, f.creditCost)}
+            {f.variants.map((v) => economyRow(v.key, `«${v.label}»`, variantCost(v), v.creditCost))}
+            <p className="mt-2 text-xs text-white/40">
+              {minCreditUzs ? `Eng arzon tarifda 1 kredit ≈ ${formatUzs(Math.round(minCreditUzs))}. ` : "Tariflar qo'shilmagan. "}
+              Video modellari soniyasiga narxlanadi{duration ? "" : " (davomiylik noma'lum — 5 soniya deb hisoblandi)"}. Tannarx tushumning 50% idan oshmasligi tavsiya etiladi.
+            </p>
           </Card>
           {!isNew && existing && (
             <Card className="p-5 text-sm">

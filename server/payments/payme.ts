@@ -1,7 +1,8 @@
+import crypto from "node:crypto";
 import type { Request, Response } from "express";
 import { and, between, eq, ne } from "drizzle-orm";
 import { db, type Tx } from "../db";
-import { orders, paymeTransactions } from "@shared/schema";
+import { orders, paymeTransactions, settings } from "@shared/schema";
 import { env } from "../env";
 import { markOrderPaid } from "./orders";
 import { revokeOrderCredits } from "../credits";
@@ -33,12 +34,29 @@ class PaymeError extends Error {
   }
 }
 
-function checkAuth(req: Request) {
+/**
+ * Kassa kaliti. Payme kabinetida kalit almashtirilsa, Payme "ChangePassword" yuboradi —
+ * yangi kalit bazaga yoziladi. Agar admin .env dagi PAYME_KEY ni keyin o'zi o'zgartirsa, .env ustun turadi.
+ */
+const KEY_SETTING = "payme_key_override";
+async function currentKey() {
+  const [row] = await db.select().from(settings).where(eq(settings.key, KEY_SETTING));
+  const v = row?.value as { key?: string; envKey?: string } | undefined;
+  return v?.key && v.envKey === env.payme.key ? v.key : env.payme.key;
+}
+
+const safeEqual = (a: string, b: string) => {
+  const x = Buffer.from(a); const y = Buffer.from(b);
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+};
+
+async function checkAuth(req: Request) {
   const header = req.headers.authorization || "";
   const [type, encoded] = header.split(" ");
   if (type !== "Basic" || !encoded) return false;
   const [login, ...rest] = Buffer.from(encoded, "base64").toString().split(":");
-  return login === "Paycom" && rest.join(":") === env.payme.key && env.payme.key.length > 0;
+  const key = await currentKey();
+  return login === "Paycom" && key.length > 0 && safeEqual(rest.join(":"), key);
 }
 
 async function findOrder(account: Record<string, unknown> | undefined, amount: number, tx: Tx | typeof db = db) {
@@ -149,6 +167,15 @@ const methods: Record<string, (p: any) => Promise<unknown>> = {
     return txView(t);
   },
 
+  async ChangePassword(p) {
+    const password = String(p.password || "");
+    if (password.length < 8) throw new PaymeError(-32400, { ru: "Неверный пароль", uz: "Parol noto'g'ri", en: "Invalid password" });
+    const value = { key: password, envKey: env.payme.key };
+    await db.insert(settings).values({ key: KEY_SETTING, value }).onConflictDoUpdate({ target: settings.key, set: { value } });
+    console.log("[payme] kassa kaliti yangilandi (ChangePassword)");
+    return { success: true };
+  },
+
   async GetStatement(p) {
     const list = await db.select().from(paymeTransactions)
       .where(between(paymeTransactions.paymeTime, Number(p.from), Number(p.to)))
@@ -166,7 +193,7 @@ export async function paymeHandler(req: Request, res: Response) {
   const id = body.id ?? null;
   const reply = (payload: object) => res.status(200).json({ jsonrpc: "2.0", id, ...payload });
   try {
-    if (!checkAuth(req)) throw new PaymeError(-32504, MSG.auth);
+    if (!(await checkAuth(req))) throw new PaymeError(-32504, MSG.auth);
     if (typeof body.method !== "string") throw new PaymeError(-32600, MSG.parse);
     const fn = methods[body.method];
     if (!fn) throw new PaymeError(-32601, MSG.method, body.method);

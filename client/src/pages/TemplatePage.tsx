@@ -3,7 +3,7 @@ import { Link, useLocation, useParams } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ImagePlus, Zap, PawPrint, Sun, ScanFace, Image as ImageIcon, X, Check } from "lucide-react";
 import { api, ApiError, queryClient, type TemplateCard } from "@/lib/api";
-import { useMe } from "@/lib/hooks";
+import { useConfig, useMe } from "@/lib/hooks";
 import { TemplatePreview } from "@/components/TemplateCard";
 import { Button, Empty, PageLoader, clsx, useToast } from "@/components/ui";
 
@@ -73,6 +73,7 @@ export function TemplatePage() {
   const [, navigate] = useLocation();
   const toast = useToast();
   const { user, balance } = useMe();
+  const { data: cfg } = useConfig();
   const { data: t, isLoading, error } = useQuery<TemplateCard>({ queryKey: [`/api/templates/${slug}`] });
   const [files, setFiles] = useState<(File | null)[]>([]);
   const [consent, setConsent] = useState(false);
@@ -116,6 +117,7 @@ export function TemplatePage() {
   }
 
   const enough = balance >= cost;
+  const paused = cfg?.generationEnabled === false;
 
   return (
     <div>
@@ -149,7 +151,7 @@ export function TemplatePage() {
                         <span className="font-semibold">{v.label}</span>
                         <span className="flex shrink-0 items-center gap-1 text-sm font-semibold"><Zap className="h-4 w-4 fill-amber-300 text-amber-300" />{v.creditCost}</span>
                       </div>
-                      <div className="mt-1 text-xs text-white/50">{v.hint || (v.key ? "" : "Yuz, soch, gavda va kiyim to'liq almashtiriladi — viral videolar uchun eng yaxshisi")}</div>
+                      <div className="mt-1 text-xs text-white/50">{v.hint || (v.key ? "" : "Yuz, soch va gavda to'liq almashtiriladi, harakat aynan takrorlanadi — viral videolar uchun eng yaxshisi")}</div>
                       {on && <Check className="absolute -right-1.5 -top-1.5 h-5 w-5 rounded-full bg-brand p-0.5" />}
                     </button>
                   );
@@ -185,15 +187,18 @@ export function TemplatePage() {
             <span>{multi ? "Rasmlardagi shaxslar — men o'zimman yoki ularning roziligini olganman." : "Rasmdagi shaxs — men o'zimman yoki uning roziligini olganman."} Bolalar va boshqa odamlarni ruxsatsiz ishlatmayman. <Link href="/terms" className="text-brand-light underline">Foydalanish shartlari</Link></span>
           </label>
 
+          {paused && (
+            <p className="mt-6 rounded-2xl bg-amber-500/10 p-4 text-sm text-amber-100">Xizmat vaqtincha to'xtatilgan — texnik ishlar olib borilmoqda. Birozdan keyin qayta urinib ko'ring.</p>
+          )}
           <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
-            <Button size="lg" loading={busy} onClick={submit} disabled={!!user && (!allPicked || !consent)} className="w-full sm:w-auto">
+            <Button size="lg" loading={busy} onClick={submit} disabled={paused || (!!user && (!allPicked || !consent))} className="w-full sm:w-auto">
               {user ? `Yaratish · ${cost} kredit` : "Kirish va yaratish"}
             </Button>
             {user && !enough && (
               <Link href="/pricing" className="text-center text-sm text-amber-300 underline">Kreditingiz {balance} ta — kredit sotib oling</Link>
             )}
           </div>
-          <p className="mt-3 text-xs text-white/40">Natija 1–3 daqiqada tayyor bo'ladi. Muvaffaqiyatsiz bo'lsa kredit avtomatik qaytariladi. Yuklangan rasmlar 24 soatdan keyin o'chiriladi.</p>
+          <p className="mt-3 text-xs text-white/40">Natija odatda 2–6 daqiqada tayyor bo'ladi. Muvaffaqiyatsiz bo'lsa kredit avtomatik qaytariladi. Yuklangan rasmlar 24 soatdan keyin o'chiriladi.</p>
         </div>
       </div>
     </div>

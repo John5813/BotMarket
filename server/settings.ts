@@ -9,7 +9,8 @@ export const DEFAULT_SETTINGS = {
   inputRetentionHours: 24,
   usdToUzs: 12500,
   supportTelegram: "",
-  generationTimeoutMinutes: 20,
+  // Kling Motion Control 10–30 soniyalik videoni navbat bilan 10–20 daqiqada tayyorlashi mumkin
+  generationTimeoutMinutes: 45,
 };
 export type SiteSettings = typeof DEFAULT_SETTINGS;
 

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { db } from "../db";
 import { categories, plans, templates, users } from "@shared/schema";
 import { hashPassword, normalizePhone, publicUser, startSession, verifyPassword } from "../auth";
@@ -9,18 +9,24 @@ import { getBalance, grantCredits } from "../credits";
 import { getSettings } from "../settings";
 import { enabledProviders } from "../payments/orders";
 import { HttpError, parse, templateDto } from "./helpers";
-import { ai } from "../ai/provider";
+import { ai, generationEnabled } from "../ai/provider";
 
 export const publicRouter = Router();
 
 const authLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 20, standardHeaders: true, legacyHeaders: false,
   message: { message: "Juda ko'p urinish. 15 daqiqadan keyin qayta urinib ko'ring." } });
 
+/** Uptime monitoring uchun (masalan UptimeRobot): server va baza ishlayaptimi */
+publicRouter.get("/health", async (_req, res) => {
+  await db.execute(sql`select 1`);
+  res.json({ ok: true, ai: ai.name, time: new Date().toISOString() });
+});
+
 publicRouter.get("/config", async (_req, res) => {
   const s = await getSettings();
   res.json({
     siteName: s.siteName, tagline: s.tagline, supportTelegram: s.supportTelegram,
-    paymentProviders: enabledProviders(), aiMode: ai.name,
+    paymentProviders: enabledProviders(), aiMode: ai.name, generationEnabled,
   });
 });
 

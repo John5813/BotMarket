@@ -84,6 +84,11 @@ export async function clickComplete(req: Request, res: Response) {
       if (ct.status === "cancelled") return E.CANCELLED;
       if (Math.abs(parseFloat(b.amount) - ct.amount) > 0.01) return E.AMOUNT;
 
+      const [order] = await tx.select().from(orders).where(eq(orders.id, ct.orderId)).for("update");
+      if (!order) return E.ORDER;
+      if (order.status === "paid") return E.ALREADY_PAID;
+      if (order.status !== "pending") return E.CANCELLED;
+
       // Click tomonida xatolik bo'lsa (error < 0) — tranzaksiya bekor qilinadi
       if (Number(b.error) < 0) {
         await tx.update(clickTransactions).set({ status: "cancelled" }).where(eq(clickTransactions.id, ct.id));

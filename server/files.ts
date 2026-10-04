@@ -59,8 +59,10 @@ export async function downloadToPrivate(url: string, dir: string, name: string, 
     await fs.copyFile(src, absPath(rel));
     return rel;
   }
-  const res = await fetch(url);
+  const res = await fetch(url, { signal: AbortSignal.timeout(180_000) });
   if (!res.ok) throw new Error(`Natijani yuklab bo'lmadi (${res.status})`);
+  const size = Number(res.headers.get("content-length") || 0);
+  if (size > 500 * 1024 * 1024) throw new Error("Natija fayli juda katta");
   const buf = Buffer.from(await res.arrayBuffer());
   const ext = extFromMime(res.headers.get("content-type") || "", fallbackExt);
   return saveBuffer(dir, buf, ext, name);

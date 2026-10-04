@@ -10,6 +10,7 @@ import { consumeCredits, getCreditOverview, InsufficientCreditsError } from "../
 import { absPath, deleteFile, extFromMime, fileMime, IMAGE_MIMES, looksLikeImage, saveBuffer } from "../files";
 import { checkoutUrl, createOrder, markOrderPaid, type Provider } from "../payments/orders";
 import { env } from "../env";
+import { generationEnabled } from "../ai/provider";
 import { generationDto, HttpError, parse, upload } from "./helpers";
 
 export const clientRouter = Router();
@@ -42,6 +43,7 @@ clientRouter.post("/generations", createLimiter, photoFields, async (req, res) =
   const [t] = await db.select().from(templates).where(eq(templates.slug, body.templateSlug));
   const isAdminTest = user.role === "admin" && req.query.test === "1";
   if (!t || (!t.isActive && !isAdminTest)) throw new HttpError(404, "Shablon topilmadi");
+  if (!generationEnabled && !isAdminTest) throw new HttpError(503, "Xizmat vaqtincha ishlamayapti. Birozdan keyin urinib ko'ring");
   const variant = body.variant ? t.variants.find((v) => v.key === body.variant) : null;
   if (body.variant && !variant) throw new HttpError(400, "Tanlangan variant topilmadi");
 

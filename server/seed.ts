@@ -9,7 +9,7 @@ import path from "node:path";
 import { eq } from "drizzle-orm";
 import { db, pool } from "./db";
 import { categories, plans, templates, type PipelineStep } from "@shared/schema";
-import { PIPELINE_PRESETS } from "@shared/presets";
+import { PIPELINE_PRESETS, buildEffectSteps } from "@shared/presets";
 import { saveBuffer } from "./files";
 
 const ASSETS = path.resolve(import.meta.dirname, "seed-assets");
@@ -22,23 +22,20 @@ const CATEGORIES = [
   { slug: "fotosessiya", title: "AI fotosessiya", emoji: "📸", sortOrder: 4 },
 ];
 
-const effect = (scene: string, motion: string): PipelineStep[] => [
-  { ...PIPELINE_PRESETS.effect.steps[0], input: { prompt: `${scene} Photorealistic, keep the exact same face and identity.`, image_urls: ["{{user_image}}"] } },
-  { ...PIPELINE_PRESETS.effect.steps[1], input: { prompt: motion, image_url: "{{prev}}", duration: "5" } },
-];
+const effect = (scene: string, motion: string): PipelineStep[] => buildEffectSteps(scene, motion);
 
 const TEMPLATES: Array<{
   slug: string; title: string; description: string; category: string; kind: "character_replace" | "effect" | "photoshoot";
   steps: PipelineStep[]; creditCost: number; allowAnimals?: boolean; featured?: boolean; isNew?: boolean; hint: string;
 }> = [
-  { slug: "lazgi", title: "Lazgi raqsi", category: "raqslar", kind: "character_replace", creditCost: 1, featured: true, isNew: true, allowAnimals: true,
+  { slug: "lazgi", title: "Lazgi raqsi", category: "raqslar", kind: "character_replace", creditCost: 2, featured: true, isNew: true, allowAnimals: true,
     description: "Xorazmning mashhur lazgi raqsini siz ijro etasiz!", hint: "Butun gavdangiz ko'rinadigan, tik turgan rasm eng yaxshi natija beradi",
     steps: PIPELINE_PRESETS.character_replace.steps },
-  { slug: "kocha-raqsi", title: "Ko'cha raqsi", category: "raqslar", kind: "character_replace", creditCost: 1, allowAnimals: true,
+  { slug: "kocha-raqsi", title: "Ko'cha raqsi", category: "raqslar", kind: "character_replace", creditCost: 2, allowAnimals: true,
     description: "Trenddagi ko'cha raqsi harakatlari", hint: "Butun gavdangiz ko'rinadigan rasm yuklang", steps: PIPELINE_PRESETS.character_replace.steps },
-  { slug: "raqschi-it", title: "Raqschi it", category: "hayvonlar", kind: "character_replace", creditCost: 1, allowAnimals: true, featured: true,
+  { slug: "raqschi-it", title: "Raqschi it", category: "hayvonlar", kind: "character_replace", creditCost: 2, allowAnimals: true, featured: true,
     description: "Itingiz yoki mushugingiz raqsga tushadi", hint: "Hayvon to'liq ko'rinadigan, tiniq rasm yuklang", steps: PIPELINE_PRESETS.character_replace.steps },
-  { slug: "dj-mushuk", title: "DJ mushuk", category: "hayvonlar", kind: "character_replace", creditCost: 1, allowAnimals: true, isNew: true,
+  { slug: "dj-mushuk", title: "DJ mushuk", category: "hayvonlar", kind: "character_replace", creditCost: 2, allowAnimals: true, isNew: true,
     description: "Uy hayvoningiz DJ pultida", hint: "Hayvonning yuzi aniq ko'rinsin", steps: PIPELINE_PRESETS.character_replace.steps },
   { slug: "stadion-kamerasi", title: "Stadion kamerasi", category: "trend", kind: "effect", creditCost: 1, featured: true,
     description: "Stadiondagi katta ekranda siz!", hint: "Yuzingiz to'g'ri qaragan, yorug' rasm yuklang",
@@ -60,10 +57,10 @@ const TEMPLATES: Array<{
 ];
 
 const PLANS = [
-  { title: "1 ta video", description: "Bir martalik sinab ko'rish", credits: 1, priceUzs: 15000, validityDays: 7, badge: "", sortOrder: 0 },
-  { title: "Haftalik", description: "8 ta video, 7 kun amal qiladi", credits: 8, priceUzs: 99000, validityDays: 7, badge: "", sortOrder: 1 },
-  { title: "Oylik", description: "30 ta video, 30 kun amal qiladi", credits: 30, priceUzs: 299000, validityDays: 30, badge: "Ommabop", sortOrder: 2 },
-  { title: "Yillik", description: "360 ta video, 1 yil amal qiladi", credits: 360, priceUzs: 2990000, validityDays: 365, badge: "Eng foydali", sortOrder: 3 },
+  { title: "Sinov", description: "3 kredit — bir-ikki videoni sinab ko'rish uchun", credits: 3, priceUzs: 39000, validityDays: 7, badge: "", sortOrder: 0 },
+  { title: "Haftalik", description: "10 kredit, 7 kun amal qiladi", credits: 10, priceUzs: 119000, validityDays: 7, badge: "", sortOrder: 1 },
+  { title: "Oylik", description: "35 kredit, 30 kun amal qiladi", credits: 35, priceUzs: 349000, validityDays: 30, badge: "Ommabop", sortOrder: 2 },
+  { title: "Yillik", description: "400 kredit, 1 yil amal qiladi", credits: 400, priceUzs: 3490000, validityDays: 365, badge: "Eng foydali", sortOrder: 3 },
 ];
 
 async function copyAsset(file: string, dir: string) {

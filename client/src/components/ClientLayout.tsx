@@ -29,7 +29,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen pb-24 sm:pb-10">
-      {cfg?.aiMode === "mock" && (
+      {cfg?.aiMode === "mock" && cfg.generationEnabled !== false && (
         <div className="bg-amber-500/15 px-4 py-1.5 text-center text-xs text-amber-200">
           Sinov rejimi: AI kaliti ulanmagan, natijalar namuna sifatida ko'rsatiladi
         </div>

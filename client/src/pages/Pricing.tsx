@@ -42,7 +42,7 @@ export function PricingPage() {
     <div>
       <div className="mb-8 text-center">
         <h1 className="text-3xl font-extrabold sm:text-4xl">Kredit sotib olish</h1>
-        <p className="mt-2 text-white/60">1 kredit = 1 ta oddiy video. Muvaffaqiyatsiz natija uchun kredit qaytariladi.</p>
+        <p className="mt-2 text-white/60">Oddiy video — 1 kredit, murakkab videolar (butun personaj) ko'proq: narx har bir shablonda ko'rsatilgan. Natija chiqmasa — kredit avtomatik qaytariladi.</p>
         {user && <div className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-card px-4 py-2 text-sm ring-1 ring-line">Hozirgi balans: <Zap className="h-4 w-4 fill-amber-300 text-amber-300" /><b>{balance}</b></div>}
       </div>
       {!plans?.length ? <Empty title="Tariflar hali qo'shilmagan" /> : (
@@ -56,7 +56,7 @@ export function PricingPage() {
                 <div className="text-lg font-bold">{p.title}</div>
                 <div className="mt-1 min-h-[2.5rem] text-sm text-white/50">{p.description}</div>
                 <div className="mt-4 text-3xl font-extrabold">{formatUzs(p.priceUzs)}</div>
-                <div className="mt-1 text-sm text-white/50">{formatUzs(perVideo(p))} / video {save > 0 && <span className="text-emerald-300">· {save}% tejash</span>}</div>
+                <div className="mt-1 text-sm text-white/50">{formatUzs(perVideo(p))} / kredit {save > 0 && <span className="text-emerald-300">· {save}% tejash</span>}</div>
                 <ul className="mt-5 flex-1 space-y-2 text-sm text-white/80">
                   <li className="flex gap-2"><Check className="h-4 w-4 shrink-0 text-brand-light" />{p.credits} ta kredit</li>
                   <li className="flex gap-2"><Check className="h-4 w-4 shrink-0 text-brand-light" />{p.validityDays} kun amal qiladi</li>

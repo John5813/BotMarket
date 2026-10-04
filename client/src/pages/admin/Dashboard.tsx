@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Users, Wallet, Layers, TriangleAlert, Cpu, Activity } from "lucide-react";
+import { Users, Wallet, Layers, TriangleAlert, Cpu, Activity, CircleCheck, CircleX, Rocket } from "lucide-react";
 import { formatUzs } from "@/lib/api";
 import { Card, PageLoader } from "@/components/ui";
 import { PageHead } from "./AdminLayout";
@@ -15,7 +15,48 @@ type Stats = {
   daily: { day: string; revenue: number; generations: number; users: number }[];
   topTemplates: { id: number; title: string; usage: number }[];
   aiMode: "fal" | "mock";
+  launch: {
+    isProd: boolean; aiReal: boolean; generationEnabled: boolean; analysisReady: boolean; paymentsReady: boolean;
+    paymeTestMode: boolean; testPayments: boolean; paymeFiscal: boolean; httpsUrl: boolean; support: boolean;
+    activePlans: number; activeTemplates: number; brokenTemplates: { id: number; title: string }[];
+  };
 };
+
+/** Sotuvni boshlashdan oldin tekshiriladigan bandlar */
+function LaunchChecklist({ l }: { l: Stats["launch"] }) {
+  const items: { ok: boolean; text: string; fix: string; critical?: boolean }[] = [
+    { ok: l.aiReal, critical: true, text: "AI ulangan (FAL_KEY)", fix: "fal.ai → API Keys; kalitni .env / Secrets ga FAL_KEY sifatida qo'shing" },
+    { ok: l.paymentsReady, critical: true, text: "To'lov tizimi ulangan (Payme yoki Click)", fix: "PAYME_MERCHANT_ID va PAYME_KEY (yoki CLICK_*) ni kiriting" },
+    { ok: !l.paymeTestMode, critical: l.isProd, text: "Payme haqiqiy kassada (sinov emas)", fix: "Sandbox sinovidan o'tgach PAYME_TEST_MODE=false qiling" },
+    { ok: !l.testPayments, critical: l.isProd, text: "Sinov to'lovlari o'chirilgan", fix: "PAYMENTS_TEST_MODE=false — aks holda istalgan kishi bepul kredit oladi" },
+    { ok: l.paymeFiscal, text: "Payme fiskal chek (IKPU) sozlangan", fix: "PAYME_IKPU_CODE va PAYME_PACKAGE_CODE ni soliq.uz dagi MXIK bo'yicha kiriting" },
+    { ok: l.httpsUrl, critical: l.isProd, text: "Sayt HTTPS manzilda (PUBLIC_URL)", fix: "PUBLIC_URL=https://sizning-domen.uz — to'lovdan qaytish shu manzilga bo'ladi" },
+    { ok: l.activePlans > 0, critical: true, text: `Faol tariflar: ${l.activePlans}`, fix: "Tariflar bo'limida kamida bitta tarif qo'shing" },
+    { ok: l.activeTemplates > 0, critical: true, text: `Faol shablonlar: ${l.activeTemplates}`, fix: "Shablon yarating, sinab ko'ring va faol qiling" },
+    { ok: l.brokenTemplates.length === 0, critical: true, text: l.brokenTemplates.length ? `Xatoli faol shablonlar: ${l.brokenTemplates.map((t) => t.title).join(", ")}` : "Faol shablonlar retsepti to'g'ri", fix: "Shablonni oching — xato sababi qizil rangda ko'rsatilgan" },
+    { ok: l.analysisReady, text: "AI tahlil ulangan (OPENROUTER_API_KEY)", fix: "Ixtiyoriy: shablon qo'shishda personajlarni avtomatik topish uchun" },
+    { ok: l.support, text: "Qo'llab-quvvatlash Telegrami ko'rsatilgan", fix: "Sozlamalar → Telegram manzili (mijozlar savol bera olishi uchun)" },
+  ];
+  const bad = items.filter((i) => !i.ok);
+  const criticalBad = bad.filter((i) => i.critical).length;
+  return (
+    <Card className="mb-5 p-5">
+      <div className="mb-3 flex items-center gap-2 font-semibold"><Rocket className="h-4 w-4 text-brand-light" />Sotuvga tayyorlik
+        <span className={`ml-auto rounded-full px-3 py-0.5 text-xs ${criticalBad ? "bg-red-500/15 text-red-300" : bad.length ? "bg-amber-500/15 text-amber-200" : "bg-emerald-500/15 text-emerald-300"}`}>
+          {criticalBad ? `${criticalBad} ta muhim band bajarilmagan` : bad.length ? "Deyarli tayyor" : "Tayyor"}
+        </span>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {items.map((i) => (
+          <div key={i.text} className="flex gap-2 rounded-xl bg-white/5 p-2.5 text-sm">
+            {i.ok ? <CircleCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" /> : <CircleX className={`mt-0.5 h-4 w-4 shrink-0 ${i.critical ? "text-red-400" : "text-amber-300"}`} />}
+            <div className="min-w-0"><div className={i.ok ? "text-white/70" : ""}>{i.text}</div>{!i.ok && <div className="text-xs text-white/45">{i.fix}</div>}</div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
 
 function Stat({ icon: Icon, label, value, sub, tone = "brand" }: { icon: typeof Users; label: string; value: string | number; sub?: string; tone?: "brand" | "green" | "amber" | "red" }) {
   const tones = { brand: "bg-brand/15 text-brand-light", green: "bg-emerald-500/15 text-emerald-300", amber: "bg-amber-500/15 text-amber-300", red: "bg-red-500/15 text-red-300" };
@@ -39,6 +80,7 @@ export function AdminDashboard() {
   return (
     <div>
       <PageHead title="Dashboard" subtitle="Oxirgi 30 kunlik ko'rsatkichlar" />
+      {s.launch && <LaunchChecklist l={s.launch} />}
       {s.aiMode === "mock" && (
         <div className="mb-5 flex items-start gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
           <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />

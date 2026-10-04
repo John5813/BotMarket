@@ -30,7 +30,7 @@ export function checkoutUrl(order: Order) {
   const returnUrl = `${env.publicUrl}/payment/${order.id}`;
   if (order.provider === "payme") {
     // Payme: base64("m=...;ac.order_id=...;a=<tiyin>;c=<qaytish URL>")
-    const params = `m=${env.payme.merchantId};ac.order_id=${order.id};a=${order.amountUzs * 100};c=${returnUrl}`;
+    const params = `m=${env.payme.merchantId};ac.order_id=${order.id};a=${order.amountUzs * 100};l=uz;c=${returnUrl}`;
     const base = env.payme.testMode ? "https://checkout.test.paycom.uz" : "https://checkout.paycom.uz";
     return `${base}/${Buffer.from(params).toString("base64")}`;
   }

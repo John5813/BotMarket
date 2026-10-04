@@ -25,6 +25,8 @@ export const env = {
   // AI: FAL_KEY bo'lmasa avtomatik "mock" (sinov) rejimi
   falKey: process.env.FAL_KEY || "",
   aiMode: (process.env.AI_MODE || (process.env.FAL_KEY ? "fal" : "mock")) as "fal" | "mock",
+  // Production'da sinov (mock) AI bilan mijozdan kredit olinmaydi. Faqat demo uchun: ALLOW_MOCK_AI=1
+  allowMockAi: bool(process.env.ALLOW_MOCK_AI, false),
   workerConcurrency: Number(process.env.WORKER_CONCURRENCY || 4),
 
   // Admin "AI tahlil" (shablon videosini ko'rib personaj va promptlarni taklif qiladi)
@@ -36,7 +38,8 @@ export const env = {
   payme: {
     merchantId: process.env.PAYME_MERCHANT_ID || "",
     key: process.env.PAYME_KEY || "",
-    testMode: bool(process.env.PAYME_TEST_MODE, true),
+    // Sinov kassasi (checkout.test.paycom.uz). Production'da sukut bo'yicha O'CHIQ
+    testMode: bool(process.env.PAYME_TEST_MODE, !isProd),
     get enabled() { return Boolean(this.merchantId && this.key); },
   },
   click: {

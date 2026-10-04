@@ -1,6 +1,6 @@
 # AIKadr — AI trend videolar sayti
 
-Mijoz trenddagi shablonni tanlaydi, o'z rasmini (yoki uy hayvoni rasmini) yuklaydi va 1–3 daqiqada tayyor AI video/rasm oladi. To'lov — kreditlar orqali (Payme, Click).
+Mijoz trenddagi shablonni tanlaydi, o'z rasmini (yoki uy hayvoni rasmini) yuklaydi va 2–6 daqiqada tayyor AI video/rasm oladi. To'lov — kreditlar orqali (Payme, Click).
 
 
 ---
@@ -20,10 +20,14 @@ Mijoz trenddagi shablonni tanlaydi, o'z rasmini (yoki uy hayvoni rasmini) yuklay
 - **Shablonlar**: kod yozmasdan yangi shablon qo'shish — namuna video, asl video, AI retsepti (qadamlar), narx, "Sinab ko'rish" tugmasi (kreditsiz)
 - Kategoriyalar, tariflar (kredit paketlari, muddati), foydalanuvchilar (kredit qo'shish/ayirish, bloklash, admin tayinlash)
 - Generatsiyalar (texnik xato sabablari bilan), to'lovlar, sozlamalar
+- **Sotuvga tayyorlik** kartasi (Dashboard): AI kaliti, to'lov rejimi, fiskal chek, HTTPS, tariflar, xatoli shablonlar — nima qolganini ko'rsatadi
+- Shablon muharririda **iqtisodiyot**: video davomiyligiga qarab tannarx, har bir variant bo'yicha foyda foizi va tavsiya etilgan kredit narxi
 
 **Ichki tizim**
 - Kredit "lot"lari: har bir to'ldirish o'z muddati bilan; avval muddati yaqin tugaydigani yechiladi; to'liq tarix
 - AI muvaffaqiyatsiz bo'lsa — 1 marta qayta urinish, keyin kredit **avtomatik qaytariladi**
+- Retsept saqlashda asl video tekshiriladi (format, davomiylik, o'lcham) — AI baribir rad etadigan shablonni mijozlarga ochib bo'lmaydi
+- Production'da `FAL_KEY` ulanmagan bo'lsa mijozlar uchun generatsiya avtomatik to'xtaydi (pul olinib, soxta natija berilmaydi)
 - Fon jarayoni (worker): holat bazada saqlanadi — server qayta ishga tushsa ham ish davom etadi
 - Mijoz rasmlari 24 soatdan keyin avtomatik o'chiriladi (sozlanadi)
 - Xavfsizlik: scrypt parol, sessiya (PostgreSQL), rate-limit, helmet/CSP, fayl imzosini tekshirish, natijalar faqat egasiga ko'rinadi, shablon promptlari mijozdan yashirin
@@ -61,7 +65,7 @@ npm run dev                   # http://localhost:5000
 | O'zgaruvchi | Qayerdan olinadi |
 |---|---|
 | `FAL_KEY` | [fal.ai/dashboard/keys](https://fal.ai/dashboard/keys) → "Add key". Hisobni oldindan to'ldiring (Billing) |
-| `OPENROUTER_API_KEY` | [openrouter.ai/keys](https://openrouter.ai/keys) — admin "AI tahlil" uchun (bitta tahlil ~1–5 cent). `OPENROUTER_MODEL` bilan model tanlanadi |
+| `OPENROUTER_API_KEY` | [openrouter.ai/keys](https://openrouter.ai/keys) — admin "AI tahlil" uchun (bitta tahlil ~1–5 cent). `OPENROUTER_MODEL` bilan model tanlanadi (standart: `google/gemini-3.8-flash`) |
 | `PAYME_MERCHANT_ID`, `PAYME_KEY` | [business.payme.uz](https://business.payme.uz) → kassa → Developers. Avval **test kalit** bilan, keyin production |
 | `PAYME_IKPU_CODE`, `PAYME_PACKAGE_CODE` | Fiskal chek uchun MXIK kodi: [tasnif.soliq.uz](https://tasnif.soliq.uz) |
 | `CLICK_SERVICE_ID`, `CLICK_MERCHANT_ID`, `CLICK_SECRET_KEY` | [merchant.click.uz](https://merchant.click.uz) → servis sozlamalari |
@@ -77,11 +81,12 @@ npm run dev                   # http://localhost:5000
 1. Payme Business kabinetida kassa yarating, **Endpoint URL**:
    `https://SIZNING-DOMEN.uz/api/payments/payme`
 2. Hisob (account) maydoni nomi: **`order_id`**
-3. `.env`: `PAYME_MERCHANT_ID`, `PAYME_KEY` (test kalit), `PAYME_TEST_MODE=true`
+3. `.env`: `PAYME_MERCHANT_ID`, `PAYME_KEY` (test kalit), `PAYME_TEST_MODE=true` (sandbox paytida)
 4. [test.paycom.uz](https://test.paycom.uz) sandbox'ida barcha testlarni o'tkazing (CheckPerform, Create, Perform, Cancel, timeout va h.k.)
-5. Testlar o'tgach — production kalit va `PAYME_TEST_MODE=false`
+5. Testlar o'tgach — production kalit va `PAYME_TEST_MODE=false` (production'da sukut bo'yicha `false`)
+6. Fiskal chek: `PAYME_IKPU_CODE` va `PAYME_PACKAGE_CODE` (MXIK) — Payme har bir to'lov uchun chek ma'lumotini (`detail`) talab qiladi
 
-Qo'llab-quvvatlanadigan metodlar: `CheckPerformTransaction`, `CreateTransaction`, `PerformTransaction`, `CancelTransaction` (kredit ishlatilmagan bo'lsa to'lovni qaytarish ham), `CheckTransaction`, `GetStatement`. Tranzaksiya 12 soat ichida bajarilmasa avtomatik bekor qilinadi.
+Qo'llab-quvvatlanadigan metodlar: `CheckPerformTransaction`, `CreateTransaction`, `PerformTransaction`, `CancelTransaction` (kredit ishlatilmagan bo'lsa to'lovni qaytarish ham), `CheckTransaction`, `GetStatement`, `ChangePassword` (kabinetda kalit almashtirilsa yangi kalit avtomatik saqlanadi; `.env`dagi `PAYME_KEY`ni keyin o'zingiz o'zgartirsangiz — o'sha ustun turadi). Tranzaksiya 12 soat ichida bajarilmasa avtomatik bekor qilinadi.
 
 ### Click
 1. Click merchant kabinetida servis sozlamalari:
@@ -158,22 +163,47 @@ Sessiya cookie'si production'da faqat HTTPS orqali ishlaydi — SSL sertifikat s
 
 ## 5. Yangi shablon qo'shish
 
-1. Admin → **Shablonlar → Yangi shablon** — avval video yoki rasm so'raladi
-2. **🤖 AI tahlil qilsin**: AI kadrlarni ko'rib personajlarni ramka bilan ko'rsatadi, qaysi personaj almashtirilishini tanlaysiz, nom/tavsif/promptlar avtomatik yoziladi. Yoki **Qo'lda kiritaman**
-3. fal.ai Playground'da natijani solishtirib, promptlarni kerak bo'lsa tahrirlang
-4. Turini o'zgartirish mumkin — qadamlar avtomatik to'ldiriladi:
-   - **Qahramon almashtirish** (raqs, hayvon): `fal-ai/wan/v2.2-14b/animate/replace` — asl videoni yuklang
-   - **Effekt**: `fal-ai/nano-banana/edit` → `fal-ai/kling-video/v2.5-turbo/pro/image-to-video` — promptlarni yozing
-   - **Fotosessiya**: bir nechta `nano-banana/edit` qadam, har biri "natija mijozga beriladi"
-   - **Maxsus**: istalgan fal.ai modeli (endpoint nomi + JSON parametrlar)
-5. Saqlash → **Sinab ko'rish** (o'z rasmingiz bilan, kreditsiz)
-6. Natija yaxshi bo'lsa — "Faol" ni yoqing
+1. Admin → **Shablonlar → Yangi shablon** — avval video yoki rasm so'raladi. Brauzer o'zi videoning o'lchami, davomiyligi va **to'liq sifatli 1-kadrini** ajratib oladi
+2. **🤖 AI tahlil qilsin**: AI 6 ta kadrni ko'rib personajlarni ramka bilan ko'rsatadi, qaysi personaj almashtirilishini tanlaysiz, nom/tavsif/promptlar avtomatik yoziladi. Kerak bo'lsa **ko'rsatma** yozasiz (pastga qarang). Yoki **Qo'lda kiritaman**
+3. Retsept turi va narx avtomatik qo'yiladi; ogohlantirishlar (format, uzunlik, sifat) shu yerning o'zida ko'rinadi
+4. Saqlash → **Sinab ko'rish** (o'z rasmingiz bilan, kreditsiz) → natija yaxshi bo'lsa **Faol**
+
+### Retsept turlari va modellar
+
+| Tur | Modellar (fal.ai) | Asl video talabi | Taxminiy tannarx |
+|---|---|---|---|
+| **Butun personaj** (viral, tavsiya) | `nano-banana-2/edit` → `kling-video/v3/pro/motion-control` | MP4/MOV, 3–30 s, bitta uzluksiz kadr | ~$0.08 + $0.168/soniya (5 s ≈ $0.92) |
+| **Faqat yuz** (arzon variant) | `half-moon-ai/ai-face-swap/faceswapvideo` | istalgan | ~$0.024/soniya (5 s ≈ $0.12) |
+| **Ko'p personajli** (2–4 kishi) | `kling-video/o3/pro/video-to-video/edit` | MP4/MOV, 3–10 s, ikkala tomoni ≥720 px | ~$0.168/soniya |
+| **Arzon almashtirish** (hayvonlar ham) | `wan/v2.2-14b/animate/replace` | istalgan | ~$0.08/soniya (720p) |
+| **Effekt** | `nano-banana-2/edit` → `kling-video/v2.5-turbo/pro/image-to-video` | shart emas | ~$0.43 |
+| **Fotosessiya** | bir nechta `nano-banana-2/edit` | shart emas | ~$0.08 / rasm |
+
+Parametr nomlari `@fal-ai/client` SDK'dagi rasmiy sxemalar bo'yicha tekshirilgan. Narxlar fal.ai'da o'zgarib turadi — har bir qadamda "Narx, $" (qat'iy) va "$ / soniya" maydonlarini yangilab qo'yishingiz mumkin. Arzonroq Motion Control kerak bo'lsa: `.../v3/standard/motion-control` (~$0.126/soniya).
+
+### Butun personaj (Motion Control) qanday ishlaydi
+Viral "AI character swap" usuli — 2 qadam:
+1. Videoning **1-kadrida** personaj mijoz bilan almashtiriladi (`{{template_frame}}` + `{{user_image}}`). Prompt: yuz, soch, teri rangi mijozniki; poza, kadr, fon, yorug'lik va boshqa odamlar aynan qoladi. Kiyim — wizardda tanlanadi: **videodagi kiyim** (trend obrazi, tavsiya) yoki **mijoz kiyimi**. Rasm nisbati (`aspect_ratio`) video nisbatiga moslanadi
+2. **Kling Motion Control** shu kadrni asl video harakati bilan jonlantiradi, musiqa saqlanadi (`keep_original_sound`). Mijoz yuzi qo'shimcha **"bog'lanadi"** (`elements` → `@Element1`) — yuz o'xshashligi butun video davomida saqlanadi. Agar bu bosqich xato bersa, qayta urinish yuz bog'lamasiz yuboriladi
+
+1-kadr muqovadan **alohida** saqlanadi — muqovani almashtirish retseptni buzmaydi. Brauzer videoni o'qiy olmasa (masalan iPhone HEVC), "Videoning 1-kadri" maydoniga birinchi kadrni rasm qilib yuklang.
+
+Yaxshi natija uchun asl video: bitta uzluksiz kadr (montajsiz), asosiy odam boshi va gavdasi aniq ko'rinadi, kadrning kamida ~5% ini egallaydi, 5–10 soniya, 720p+.
+
+### Variantlar («Butun personaj» / «Faqat yuz»)
+Bitta personajli video shablonga arzon **«Faqat yuz»** variantini qo'shish mumkin. Mijoz sahifada ikkala variantni narxi bilan ko'radi va o'zi tanlaydi; kredit tanlangan variant narxida yechiladi. Har variantning o'z narxi va qadamlari bor — "Mijozga variantlar" bo'limida tahrirlanadi.
+
+### Narx qo'yish (kredit)
+Muharrirdagi **Iqtisodiyot** kartasi har bir variant uchun tannarx, foyda foizi va **tavsiya etilgan kredit**ni ko'rsatadi. Hisob eng arzon tarifdagi 1 kredit narxi bo'yicha (masalan yillik tarif): tannarx tushumning 50% idan oshmasin. Misol (1 kredit ≈ 8 700 so'm, $1 = 12 500 so'm):
+- Butun personaj, 5 s video ≈ $0.92 → **3 kredit**; 10 s video ≈ $1.76 → **6 kredit**
+- Faqat yuz ≈ $0.12–0.24 → **1 kredit**
+
+AI tahlil yoki retsept qo'llanganda tavsiya etilgan narx avtomatik qo'yiladi.
 
 ### Ko'p personajli video (2–4 kishi)
 - AI tahlilda videoda 2+ odam topilsa **"Ko'p personajli"** turi tavsiya qilinadi — almashtiriladigan personajlarni tartib bilan belgilaysiz (1-tanlangan → mijozning 1-rasmi)
 - Mijoz sahifasida har bir personaj uchun alohida rasm joyi chiqadi ("Kuyov", "Kelin" ...) — nomlarni "Mijozdan so'raladigan rasmlar" bo'limida o'zgartirasiz
-- Model: **Kling O1 Video Edit** (`fal-ai/kling-video/o1/video-to-video/edit`) — promptda `@Image1`, `@Image2`; asl video **MP4/MOV, 3–10 soniya, 720p+**, ko'pi bilan 4 ta rasm
-- Tannarx yuqoriroq (~$1/video) — narxni 4+ kredit qiling. Endpoint nomi va parametrlarini fal.ai sahifasida tekshirib oling
+- Promptda `@Video1` — asl video, `@Image1`, `@Image2` — mijoz rasmlari; ko'pi bilan 4 ta rasm
 
 ### AI ga ko'rsatma berish (ko'p odamli sahna)
 Video tanlangandan keyin **"AI uchun ko'rsatma"** maydoniga o'z so'zingiz bilan yozing, masalan:
@@ -181,22 +211,21 @@ Video tanlangandan keyin **"AI uchun ko'rsatma"** maydoniga o'z so'zingiz bilan 
 - *"Keyingi kadrdagi kostyumli yigitni almashtir, kostyum rangi saqlansin"*
 - *"Kelin va kuyovni almashtir: 1-rasm kuyov, 2-rasm kelin"*
 
-AI (videodan 6 ta kadr ko'radi) aynan shu personaj(lar)ni topib belgilaydi, qo'shimcha talablarni inglizchaga o'girib promptlarga qo'shadi va qanday tushunganini yozib ko'rsatadi. 2+ personaj aytilsa — avtomatik "Ko'p personajli" rejim, aytilgan tartibda. Natija yoqmasa, ko'rsatmani o'zgartirib **"Qayta tahlil qilish"** tugmasini bosing.
-
-### Butun personaj (Motion Control) va «Faqat yuz» varianti
-Viral "AI character swap" usuli — 2 qadam:
-1. Videoning **1-kadrida** odam mijoz bilan almashtiriladi (`fal-ai/nano-banana/edit`, `{{template_frame}}` + `{{user_image}}`)
-2. **Kling Motion Control** (`fal-ai/kling-video/v3/pro/motion-control`) shu kadrni asl videodagi harakat bilan jonlantiradi (`character_orientation: "video"` — 30 soniyagacha)
-
-`{{template_frame}}` — shablonning muqova rasmi. AI tahlil uni videoning eng birinchi kadridan avtomatik oladi; qo'lda yuklasangiz ham aynan 1-kadr bo'lsin.
-
-**Variantlar:** har bir bitta-personajli video shablonga arzon **«Faqat yuz»** variantini qo'shish mumkin (`half-moon-ai/ai-face-swap/faceswapvideo`, ~$0.0008/kadr). Mijoz sahifada ikkala variantni narxi bilan ko'radi va o'zi tanlaydi. Har variantning o'z narxi (kredit) va o'z qadamlari bor — "Mijozga variantlar" bo'limida tahrirlanadi. Face swap parametr nomlarini (`source_face_url`, `target_video_url`) fal.ai sahifasida tekshiring.
-
-Tavsiya narxlar: Butun personaj — 2–3 kredit (~$0.65 tannarx 5 soniyaga), Faqat yuz — 1 kredit (~$0.15).
+AI aynan shu personaj(lar)ni topib belgilaydi, qo'shimcha talablarni inglizchaga o'girib promptlarga qo'shadi va qanday tushunganini yozib ko'rsatadi. 2+ personaj aytilsa — avtomatik "Ko'p personajli" rejim, aytilgan tartibda. Natija yoqmasa, ko'rsatmani o'zgartirib **"Qayta tahlil qilish"** tugmasini bosing.
 
 O'rinbosarlar: `{{user_image}}` (= `{{user_image_1}}`), `{{user_image_2}}`..., `{{template_video}}`, `{{template_image}}`, `{{template_frame}}`, `{{prev}}`, `{{step_0}}`, `{{step_1}}`...
 
 ---
+
+## 5.1. Sotuvni boshlashdan oldin
+
+Admin → **Dashboard → "Sotuvga tayyorlik"** kartasi qolgan ishlarni ko'rsatadi. Qisqa ro'yxat:
+1. `FAL_KEY` ulangan va fal.ai balansi to'ldirilgan (kamida $20–50)
+2. Payme sandbox testlari o'tgan → production kalit, `PAYME_TEST_MODE=false`, IKPU kodlari
+3. `PAYMENTS_TEST_MODE=false`, `PUBLIC_URL=https://...` (HTTPS)
+4. Har bir faol shablon **Sinab ko'rish** bilan kamida 2–3 xil rasmda tekshirilgan, narxi tavsiyadan past emas
+5. Foydalanish shartlari va qo'llab-quvvatlash Telegrami (Sozlamalar)
+6. Monitoring: `GET /api/health` ni UptimeRobot kabi xizmatga qo'shing
 
 ## 6. Muhim huquqiy eslatmalar
 
@@ -219,7 +248,7 @@ O'rinbosarlar: `{{user_image}}` (= `{{user_image_1}}`), `{{user_image_2}}`..., `
 
 ```
 ./
-├── shared/          schema.ts (baza), presets.ts (AI retsept andozalari)
+├── shared/          schema.ts (baza), presets.ts (AI retseptlar va promptlar), recipe.ts (tannarx, tekshiruvlar)
 ├── server/
 │   ├── index.ts     Express server
 │   ├── worker.ts    AI generatsiya fon jarayoni

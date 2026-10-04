@@ -32,7 +32,7 @@ export const queryClient = new QueryClient({
 // Turlar (server javoblari)
 // ---------------------------------------------------------------------------
 export type Me = { user: { id: number; phone: string; name: string; role: "user" | "admin" } | null; balance?: number };
-export type SiteConfig = { siteName: string; tagline: string; supportTelegram: string; paymentProviders: ("payme" | "click" | "test")[]; aiMode: "fal" | "mock" };
+export type SiteConfig = { siteName: string; tagline: string; supportTelegram: string; paymentProviders: ("payme" | "click" | "test")[]; aiMode: "fal" | "mock"; generationEnabled?: boolean };
 export type TemplateCard = {
   id: number; slug: string; title: string; description: string; categoryId: number | null; kind: string;
   previewUrl: string | null; previewIsVideo: boolean; posterUrl: string | null; creditCost: number;
@@ -50,6 +50,11 @@ export type GenerationItem = {
 };
 export type Plan = { id: number; title: string; description: string; credits: number; priceUzs: number; validityDays: number; badge: string; sortOrder: number; isActive: boolean };
 export type Order = { id: number; planTitle: string; amountUzs: number; credits: number; validityDays: number; provider: string; status: string; createdAt: string; paidAt: string | null; user?: { phone: string; name: string } };
+
+/** Shablonning eng arzon narxi (variantlar bo'lsa — eng arzon variant) */
+export function minCredits(t: Pick<TemplateCard, "creditCost" | "variants">) {
+  return t.variants?.length ? Math.min(...t.variants.map((v) => v.creditCost)) : t.creditCost;
+}
 
 export function formatUzs(n: number) {
   return new Intl.NumberFormat("ru-RU").format(n).replace(/[ ,]/g, " ") + " so'm";

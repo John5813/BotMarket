@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, ChevronLeft, Sparkles, Zap } from "lucide-react";
-import type { Catalog } from "@/lib/api";
+import { minCredits, type Catalog } from "@/lib/api";
 import { useConfig } from "@/lib/hooks";
 import { TemplateCard, TemplatePreview } from "@/components/TemplateCard";
 import { Empty, clsx } from "@/components/ui";
@@ -27,7 +27,7 @@ function HeroCarousel({ items }: { items: Catalog["featured"] }) {
           <p className="max-w-md text-white/60">{t.description}</p>
           <div className="mt-2 flex items-center gap-3">
             <Link href={`/t/${t.slug}`} className="rounded-full bg-white px-7 py-3 font-semibold text-black transition hover:bg-white/90">Sinab ko'rish</Link>
-            <span className="flex items-center gap-1 text-sm text-white/50"><Zap className="h-4 w-4 fill-amber-300 text-amber-300" />{t.creditCost} kredit</span>
+            <span className="flex items-center gap-1 text-sm text-white/50"><Zap className="h-4 w-4 fill-amber-300 text-amber-300" />{t.variants?.length ? `${minCredits(t)} kreditdan` : `${t.creditCost} kredit`}</span>
           </div>
           {items.length > 1 && (
             <div className="mt-4 flex items-center gap-3">
