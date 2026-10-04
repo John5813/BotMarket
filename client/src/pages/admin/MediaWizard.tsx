@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Sparkles, PenLine, User, PawPrint, TriangleAlert, ChevronLeft, Film, Image as ImageIcon } from "lucide-react";
 import { api } from "@/lib/api";
-import { buildStepsFromAnalysis } from "@shared/presets";
-import type { PipelineStep } from "@shared/schema";
+import { buildMultiCharacterSteps, buildStepsFromAnalysis } from "@shared/presets";
+import type { InputSlot, PipelineStep } from "@shared/schema";
 import { Button, Modal, Spinner, clsx, useToast } from "@/components/ui";
 
 export type Analysis = {
@@ -18,10 +18,12 @@ export type WizardResult = {
   poster: File | null;
   mediaType: "video" | "image";
   /** AI tahlil qilingan bo'lsa — formaga qo'llanadigan qiymatlar */
-  fill?: { title: string; description: string; inputHint: string; allowAnimals: boolean; kind: "character_replace" | "effect" | "photoshoot"; steps: PipelineStep[] };
+  fill?: { title: string; description: string; inputHint: string; allowAnimals: boolean; kind: Kind; steps: PipelineStep[]; inputSlots: InputSlot[] };
 };
 
+type Kind = "character_replace" | "multi_character" | "effect" | "photoshoot";
 const MAX_SIDE = 768;
+const MAX_MULTI = 4; // Kling O1 Video Edit: ko'pi bilan 4 ta rasm
 
 function drawToJpeg(src: CanvasImageSource, w: number, h: number) {
   const k = Math.min(1, MAX_SIDE / Math.max(w, h));
@@ -77,7 +79,8 @@ async function dataUrlToFile(dataUrl: string, name: string) {
 
 const KIND_OPTIONS = {
   video: [
-    ["character_replace", "Qahramonni almashtirish", "Harakat va kamera aynan saqlanadi (raqs, yurish)"],
+    ["character_replace", "Bitta qahramon", "Bitta odam almashtiriladi, harakat aynan saqlanadi (raqs, yurish)"],
+    ["multi_character", "Ko'p personajli", "2–4 kishi, har biri mijozning alohida rasmi bilan almashtiriladi"],
     ["effect", "Effekt", "Sahna mijoz rasmidan qayta yaratiladi va jonlantiriladi"],
   ],
   image: [
@@ -95,12 +98,13 @@ export function MediaWizard({ open, onClose, onDone }: { open: boolean; onClose:
   const [stage, setStage] = useState<"pick" | "frames" | "analyzing" | "result">("pick");
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [charId, setCharId] = useState<number | null>(null);
-  const [kind, setKind] = useState<"character_replace" | "effect" | "photoshoot">("effect");
+  const [kind, setKind] = useState<Kind>("effect");
+  const [multiIds, setMultiIds] = useState<number[]>([]);
   const [frameIdx, setFrameIdx] = useState(0);
 
   useEffect(() => {
     if (!open) return;
-    setFile(null); setPreview(null); setFrames([]); setStage("pick"); setAnalysis(null); setCharId(null); setFrameIdx(0);
+    setFile(null); setPreview(null); setFrames([]); setStage("pick"); setAnalysis(null); setCharId(null); setFrameIdx(0); setMultiIds([]);
   }, [open]);
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
 
@@ -129,7 +133,14 @@ export function MediaWizard({ open, onClose, onDone }: { open: boolean; onClose:
       setAnalysis(a);
       setCharId(a.mainCharacterId);
       const rk = a.recommendedKind;
-      setKind(mediaType === "image" ? (rk === "photoshoot" ? "photoshoot" : "effect") : rk === "character_replace" ? "character_replace" : "effect");
+      const humans = a.characters.filter((c) => c.type === "human");
+      if (mediaType === "video" && a.characters.length >= 2) {
+        // Bir nechta personaj — ko'p personajli rejim tavsiya qilinadi, asosiylari oldindan belgilanadi
+        setKind("multi_character");
+        setMultiIds((humans.length >= 2 ? humans : a.characters).slice(0, Math.min(2, MAX_MULTI)).map((c) => c.id));
+      } else {
+        setKind(mediaType === "image" ? (rk === "photoshoot" ? "photoshoot" : "effect") : rk === "character_replace" ? "character_replace" : "effect");
+      }
       const main = a.characters.find((c) => c.id === a.mainCharacterId);
       setFrameIdx(main?.frame ?? 0);
       setStage("result");
@@ -143,12 +154,26 @@ export function MediaWizard({ open, onClose, onDone }: { open: boolean; onClose:
     if (!file) return;
     const poster = frames[0] ? await dataUrlToFile(frames[0], "poster.jpg") : null;
     if (!useAi || !analysis) {
-      const defaultKind = mediaType === "video" ? "character_replace" : "effect";
       onDone({
         file, poster, mediaType,
         fill: mediaType === "image"
-          ? { title: "", description: "", inputHint: "", allowAnimals: false, kind: defaultKind, steps: buildStepsFromAnalysis({ scene: "", motion: "", characters: [] }, { mediaType, kind: defaultKind, characterId: null }) }
+          ? { title: "", description: "", inputHint: "", allowAnimals: false, kind: "effect", inputSlots: [], steps: buildStepsFromAnalysis({ scene: "", motion: "", characters: [] }, { mediaType, kind: "effect", characterId: null }) }
           : undefined,
+      });
+      return;
+    }
+    if (kind === "multi_character") {
+      if (multiIds.length < 2) return toast("Kamida 2 ta personajni tanlang (yoki 'Bitta qahramon' turini tanlang)", "error");
+      const chosen = multiIds.map((id) => analysis.characters.find((c) => c.id === id)!);
+      onDone({
+        file, poster, mediaType,
+        fill: {
+          title: analysis.titleUz, description: analysis.descriptionUz,
+          inputHint: "Har bir personaj uchun yuzi aniq ko'ringan alohida rasm yuklang",
+          allowAnimals: chosen.some((c) => c.type === "animal"),
+          kind, steps: buildMultiCharacterSteps(analysis, multiIds),
+          inputSlots: chosen.map((c) => ({ label: c.labelUz.slice(0, 40), hint: c.type === "animal" ? "Hayvon rasmi" : "Yuzi aniq ko'ringan rasm" })),
+        },
       });
       return;
     }
@@ -158,12 +183,21 @@ export function MediaWizard({ open, onClose, onDone }: { open: boolean; onClose:
       fill: {
         title: analysis.titleUz, description: analysis.descriptionUz, inputHint: analysis.inputHintUz,
         allowAnimals: analysis.allowAnimals || ch?.type === "animal",
-        kind, steps: buildStepsFromAnalysis(analysis, { mediaType, kind, characterId: charId }),
+        kind, steps: buildStepsFromAnalysis(analysis, { mediaType, kind: kind as "character_replace" | "effect" | "photoshoot", characterId: charId }),
+        inputSlots: [],
       },
     });
   }
 
   const shownFrame = frames[frameIdx] || frames[0];
+  const multi = kind === "multi_character";
+  const isSelected = (id: number) => (multi ? multiIds.includes(id) : id === charId);
+  const slotNo = (id: number) => multiIds.indexOf(id) + 1;
+  function choose(id: number) {
+    if (!multi) return setCharId(id);
+    setMultiIds((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : cur.length >= MAX_MULTI ? (toast(`Ko'pi bilan ${MAX_MULTI} ta personaj`, "error"), cur) : [...cur, id]);
+  }
+  const notMp4 = multi && file && !/^video\/(mp4|quicktime)$/.test(file.type);
 
   return (
     <Modal open={open} onClose={onClose} title={stage === "result" ? "AI tahlil natijasi" : "Shablon mediasini yuklang"} wide>
@@ -226,10 +260,10 @@ export function MediaWizard({ open, onClose, onDone }: { open: boolean; onClose:
                 {analysis.characters.filter((c) => c.box && c.frame === frameIdx).map((c) => {
                   const [y0, x0, y1, x1] = c.box!;
                   return (
-                    <button key={c.id} onClick={() => setCharId(c.id)}
-                      className={clsx("absolute rounded-md border-2 transition", c.id === charId ? "border-brand bg-brand/20 shadow-[0_0_0_2px_rgba(124,92,255,.4)]" : "border-white/70 bg-white/5")}
+                    <button key={c.id} onClick={() => choose(c.id)}
+                      className={clsx("absolute rounded-md border-2 transition", isSelected(c.id) ? "border-brand bg-brand/20 shadow-[0_0_0_2px_rgba(124,92,255,.4)]" : "border-white/70 bg-white/5")}
                       style={{ top: `${y0 / 10}%`, left: `${x0 / 10}%`, height: `${(y1 - y0) / 10}%`, width: `${(x1 - x0) / 10}%` }}>
-                      <span className={clsx("absolute -top-0.5 left-0 -translate-y-full rounded px-1 text-[10px] font-bold", c.id === charId ? "bg-brand" : "bg-black/70")}>{c.id}</span>
+                      <span className={clsx("absolute -top-0.5 left-0 -translate-y-full rounded px-1 text-[10px] font-bold", isSelected(c.id) ? "bg-brand" : "bg-black/70")}>{multi && isSelected(c.id) ? `Rasm ${slotNo(c.id)}` : c.id}</span>
                     </button>
                   );
                 })}
@@ -243,13 +277,13 @@ export function MediaWizard({ open, onClose, onDone }: { open: boolean; onClose:
 
             <div className="space-y-4">
               <div>
-                <div className="label">Qaysi personaj almashtiriladi?</div>
+                <div className="label">{multi ? "Qaysi personajlar almashtiriladi? (tartib = rasm tartibi)" : "Qaysi personaj almashtiriladi?"}</div>
                 {analysis.characters.length === 0 && <p className="text-sm text-white/50">AI personaj topmadi — promptlarni qo'lda tahrirlang.</p>}
                 <div className="space-y-2">
                   {analysis.characters.map((c) => (
-                    <button key={c.id} onClick={() => { setCharId(c.id); setFrameIdx(c.frame); }}
-                      className={clsx("flex w-full items-start gap-3 rounded-xl border p-3 text-left text-sm transition", c.id === charId ? "border-brand bg-brand/10" : "border-line hover:border-white/30")}>
-                      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/10 text-xs font-bold">{c.id}</span>
+                    <button key={c.id} onClick={() => { choose(c.id); setFrameIdx(c.frame); }}
+                      className={clsx("flex w-full items-start gap-3 rounded-xl border p-3 text-left text-sm transition", isSelected(c.id) ? "border-brand bg-brand/10" : "border-line hover:border-white/30")}>
+                      <span className={clsx("mt-0.5 flex h-6 shrink-0 items-center justify-center rounded-full px-2 text-xs font-bold", multi && isSelected(c.id) ? "bg-brand" : "bg-white/10")}>{multi ? (isSelected(c.id) ? `Rasm ${slotNo(c.id)}` : "+") : c.id}</span>
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center gap-1.5 font-medium">{c.type === "animal" ? <PawPrint className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}{c.labelUz}{c.isMain && <span className="rounded bg-white/10 px-1.5 text-[10px]">asosiy</span>}</span>
                         <span className="block text-xs text-white/40">{c.descriptionEn}</span>
@@ -269,6 +303,12 @@ export function MediaWizard({ open, onClose, onDone }: { open: boolean; onClose:
                     </button>
                   ))}
                 </div>
+                {multi && (
+                  <p className="mt-2 text-xs text-white/50">Mijozdan {multiIds.length} ta rasm so'raladi: {multiIds.map((id, i) => `${i + 1}) ${analysis.characters.find((c) => c.id === id)?.labelUz}`).join(", ")}</p>
+                )}
+                {notMp4 && (
+                  <p className="mt-2 text-xs text-red-300">Ko'p personajli model (Kling O1) faqat MP4 yoki MOV videoni qabul qiladi. Bu faylni MP4 ga o'tkazib yuklang, aks holda generatsiya xato beradi.</p>
+                )}
                 {kind === "character_replace" && analysis.characters.length > 1 && (
                   <p className="mt-2 text-xs text-amber-200">Eslatma: "Qahramonni almashtirish" modeli videodagi eng ko'zga tashlanadigan personajni o'zi tanlaydi. Bir nechta odam bo'lsa, natijani albatta sinab ko'ring.</p>
                 )}

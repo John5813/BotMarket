@@ -169,7 +169,13 @@ Sessiya cookie'si production'da faqat HTTPS orqali ishlaydi — SSL sertifikat s
 5. Saqlash → **Sinab ko'rish** (o'z rasmingiz bilan, kreditsiz)
 6. Natija yaxshi bo'lsa — "Faol" ni yoqing
 
-O'rinbosarlar: `{{user_image}}`, `{{template_video}}`, `{{template_image}}`, `{{prev}}`, `{{step_0}}`, `{{step_1}}`...
+### Ko'p personajli video (2–4 kishi)
+- AI tahlilda videoda 2+ odam topilsa **"Ko'p personajli"** turi tavsiya qilinadi — almashtiriladigan personajlarni tartib bilan belgilaysiz (1-tanlangan → mijozning 1-rasmi)
+- Mijoz sahifasida har bir personaj uchun alohida rasm joyi chiqadi ("Kuyov", "Kelin" ...) — nomlarni "Mijozdan so'raladigan rasmlar" bo'limida o'zgartirasiz
+- Model: **Kling O1 Video Edit** (`fal-ai/kling-video/o1/video-to-video/edit`) — promptda `@Image1`, `@Image2`; asl video **MP4/MOV, 3–10 soniya, 720p+**, ko'pi bilan 4 ta rasm
+- Tannarx yuqoriroq (~$1/video) — narxni 4+ kredit qiling. Endpoint nomi va parametrlarini fal.ai sahifasida tekshirib oling
+
+O'rinbosarlar: `{{user_image}}` (= `{{user_image_1}}`), `{{user_image_2}}`..., `{{template_video}}`, `{{template_image}}`, `{{prev}}`, `{{step_0}}`, `{{step_1}}`...
 
 ---
 

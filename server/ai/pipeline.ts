@@ -2,6 +2,8 @@ import type { PipelineStep, StepResult } from "@shared/schema";
 
 export type PipelineVars = {
   user_image: string;
+  /** 2-, 3-... rasmlar ({{user_image_2}}, {{user_image_3}}) */
+  extra_images?: string[];
   template_video?: string | null;
   results: StepResult[];
 };
@@ -21,7 +23,13 @@ export function resolveInput(value: unknown, vars: PipelineVars): unknown {
 }
 
 function lookup(key: string, vars: PipelineVars): string {
-  if (key === "user_image") return vars.user_image;
+  if (key === "user_image" || key === "user_image_1") return vars.user_image;
+  const ui = key.match(/^user_image_(\d+)$/);
+  if (ui) {
+    const url = vars.extra_images?.[Number(ui[1]) - 2];
+    if (!url) throw new Error(`{{${key}}} uchun rasm yuklanmagan`);
+    return url;
+  }
   if (key === "template_video" || key === "template_image") {
     if (!vars.template_video) throw new Error(`Shablonda asl media yuklanmagan ({{${key}}})`);
     return vars.template_video;
@@ -77,4 +85,11 @@ export function validateSteps(steps: unknown): { ok: true; steps: PipelineStep[]
     if (i === 0 && JSON.stringify(s.input).includes("{{prev}}")) return { ok: false, error: "1-qadamda {{prev}} ishlatib bo'lmaydi" };
   }
   return { ok: true, steps: steps as PipelineStep[] };
+}
+
+/** Retseptda ishlatilgan eng katta mijoz rasmi raqami ({{user_image_3}} → 3) */
+export function maxUserImageIndex(steps: PipelineStep[]) {
+  let max = 1;
+  for (const m of JSON.stringify(steps).matchAll(/\{\{\s*user_image_(\d+)\s*\}\}/g)) max = Math.max(max, Number(m[1]));
+  return max;
 }

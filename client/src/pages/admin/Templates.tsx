@@ -3,7 +3,7 @@ import { Link, useLocation, useParams } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, Save, FlaskConical, Info, Zap, Upload, ChevronLeft, Copy, Sparkles } from "lucide-react";
 import { PIPELINE_PRESETS, KIND_LABELS } from "@shared/presets";
-import type { PipelineStep } from "@shared/schema";
+import type { InputSlot, PipelineStep } from "@shared/schema";
 import { api, formatUzs, queryClient } from "@/lib/api";
 import { Badge, Button, Card, Empty, Modal, NumInput, PageLoader, Toggle, clsx, useToast } from "@/components/ui";
 import { PageHead } from "./AdminLayout";
@@ -11,8 +11,8 @@ import { MediaWizard, type WizardResult } from "./MediaWizard";
 
 type AdminTemplate = {
   id: number; slug: string; title: string; description: string; categoryId: number | null; kind: keyof typeof KIND_LABELS | string;
-  previewUrl: string | null; posterUrl: string | null; sourceVideoUrl: string | null; sourceIsVideo?: boolean; previewPath: string | null;
-  steps: PipelineStep[]; creditCost: number; allowAnimals: boolean; inputHint: string; isActive: boolean; isFeatured: boolean;
+  previewUrl: string | null; posterUrl: string | null; sourceVideoUrl: string | null; sourceIsVideo?: boolean; sourceVideoPath?: string | null; previewPath: string | null;
+  steps: PipelineStep[]; inputSlots: InputSlot[]; creditCost: number; allowAnimals: boolean; inputHint: string; isActive: boolean; isFeatured: boolean;
   isNew: boolean; sortOrder: number; usageCount: number; estimatedCostUsd: number;
 };
 type Category = { id: number; title: string; emoji: string };
@@ -103,7 +103,7 @@ export function AdminTemplates() {
 type Form = Omit<AdminTemplate, "id" | "previewUrl" | "posterUrl" | "sourceVideoUrl" | "previewPath" | "usageCount" | "estimatedCostUsd">;
 const EMPTY: Form = {
   title: "", slug: "", description: "", categoryId: null, kind: "effect", steps: PIPELINE_PRESETS.effect.steps,
-  creditCost: 1, allowAnimals: false, inputHint: "", isActive: false, isFeatured: false, isNew: true, sortOrder: 0,
+  inputSlots: [], creditCost: 1, allowAnimals: false, inputHint: "", isActive: false, isFeatured: false, isNew: true, sortOrder: 0,
 };
 
 function FilePick({ label, accept, current, file, onFile, hint, forceVideo }: { label: string; accept: string; current: string | null; file: File | null; onFile: (f: File | null) => void; hint?: string; forceVideo?: boolean }) {
@@ -199,6 +199,34 @@ function StepEditor({ steps, onChange }: { steps: PipelineStep[]; onChange: (s: 
   );
 }
 
+/** Mijozdan nechta va qanday rasm so'ralishi (ko'p personajli shablonlar) */
+function SlotEditor({ slots, onChange }: { slots: InputSlot[]; onChange: (s: InputSlot[]) => void }) {
+  const list = slots.length ? slots : [{ label: "Rasmingiz" }];
+  const update = (i: number, patch: Partial<InputSlot>) => onChange(list.map((x, k) => (k === i ? { ...x, ...patch } : x)));
+  return (
+    <Card className="p-5">
+      <div className="label">Mijozdan so'raladigan rasmlar</div>
+      <div className="space-y-2">
+        {list.map((sl, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <span className="w-14 shrink-0 text-xs text-white/40">{list.length > 1 ? `@Image${i + 1}` : "rasm"}</span>
+            <input className="input py-2" value={sl.label} placeholder="Masalan: Kuyov" onChange={(e) => update(i, { label: e.target.value })} />
+            {list.length > 1 && (
+              <button type="button" onClick={() => onChange(list.filter((_, k) => k !== i))} className="rounded-lg p-2 text-white/50 hover:text-red-300" aria-label="O'chirish"><Trash2 className="h-4 w-4" /></button>
+            )}
+          </div>
+        ))}
+      </div>
+      {list.length < 4 && (
+        <Button type="button" size="sm" variant="ghost" className="mt-2" onClick={() => onChange([...list, { label: `${list.length + 1}-personaj` }])}>
+          <Plus className="h-4 w-4" />Rasm joyi qo'shish
+        </Button>
+      )}
+      <p className="mt-1 text-xs text-white/40">Bir nechta personajli videolar uchun. Har bir joy retseptda <code>{"{{user_image_N}}"}</code> ga mos keladi.</p>
+    </Card>
+  );
+}
+
 export function AdminTemplateEditor() {
   const { id } = useParams<{ id: string }>();
   const isNew = id === "new";
@@ -235,7 +263,8 @@ export function AdminTemplateEditor() {
       setF((s) => ({
         ...s,
         title: fill.title || s.title, description: fill.description || s.description, inputHint: fill.inputHint || s.inputHint,
-        allowAnimals: fill.allowAnimals, kind: fill.kind, steps: fill.steps,
+        allowAnimals: fill.allowAnimals, kind: fill.kind, steps: fill.steps, inputSlots: fill.inputSlots,
+        creditCost: fill.kind === "multi_character" ? Math.max(s.creditCost, 4) : s.creditCost,
       }));
     } else if (r.mediaType === "video" && isNew) {
       setF((s) => ({ ...s, kind: "character_replace", allowAnimals: true, steps: JSON.parse(JSON.stringify(PIPELINE_PRESETS.character_replace.steps)) }));
@@ -250,6 +279,10 @@ export function AdminTemplateEditor() {
     if (preset && (isNew || confirm(`"${preset.title}" andozasi qadamlarini qo'llaymi? Hozirgi qadamlar almashtiriladi.`))) {
       set("steps", JSON.parse(JSON.stringify(preset.steps)));
       if (kind === "character_replace") set("allowAnimals", true);
+      if (kind === "multi_character") {
+        setF((s) => ({ ...s, creditCost: Math.max(s.creditCost, 4),
+          inputSlots: s.inputSlots.length >= 2 ? s.inputSlots : [{ label: "1-personaj" }, { label: "2-personaj" }] }));
+      }
     }
   }
 
@@ -287,6 +320,9 @@ export function AdminTemplateEditor() {
   }
 
   const preset = PIPELINE_PRESETS[f.kind as keyof typeof PIPELINE_PRESETS];
+  const klingO1 = JSON.stringify(f.steps).includes("kling-video/o1");
+  const sourceNotMp4 = files.sourceVideo ? !/^video\/(mp4|quicktime)$/.test(files.sourceVideo.type)
+    : !!existing?.sourceVideoUrl && !!existing.sourceIsVideo && !/\.(mp4|mov)$/i.test(existing.sourceVideoPath || "");
 
   return (
     <div className="max-w-5xl">
@@ -326,11 +362,15 @@ export function AdminTemplateEditor() {
               </select>
             </div>
             {preset && <p className="mb-4 rounded-xl bg-brand/10 p-3 text-sm text-white/70">{preset.description}</p>}
+            {klingO1 && sourceNotMp4 && (
+              <p className="mb-4 rounded-xl bg-red-500/10 p-3 text-sm text-red-200">Kling O1 faqat MP4 yoki MOV videoni qabul qiladi (3–10 soniya, 720p+). Asl videoni MP4 formatida yuklang.</p>
+            )}
             <StepEditor steps={f.steps} onChange={(s) => set("steps", s)} />
             <details className="mt-4 rounded-xl bg-white/5 p-3 text-sm text-white/60">
               <summary className="flex cursor-pointer items-center gap-2 font-medium text-white/80"><Info className="h-4 w-4" />O'rinbosarlar va maslahatlar</summary>
               <ul className="mt-2 list-disc space-y-1 pl-5">
-                <li><code>{"{{user_image}}"}</code> — mijoz yuklagan rasm</li>
+                <li><code>{"{{user_image}}"}</code> — mijoz yuklagan rasm. Bir nechta rasm joyi bo'lsa: <code>{"{{user_image_1}}"}</code>, <code>{"{{user_image_2}}"}</code>...</li>
+                <li>Kling O1 promptida mijoz rasmlari <code>@Image1</code>, <code>@Image2</code> deb yoziladi (image_urls tartibida)</li>
                 <li><code>{"{{template_video}}"}</code> / <code>{"{{template_image}}"}</code> — o'ng tomonda yuklangan asl video yoki rasm</li>
                 <li><code>{"{{prev}}"}</code> — oldingi qadam natijasi, <code>{"{{step_0}}"}</code> — 1-qadam natijasi</li>
                 <li>Promptlarni ingliz tilida yozing va "keep the exact same face" qo'shing — yuz o'xshashligi yaxshilanadi</li>
@@ -341,6 +381,7 @@ export function AdminTemplateEditor() {
         </div>
 
         <div className="space-y-5">
+          <SlotEditor slots={f.inputSlots} onChange={(v) => set("inputSlots", v)} />
           <Card className="space-y-3 p-5">
             <Toggle checked={f.isActive} onChange={(v) => set("isActive", v)} label="Faol (mijozlarga ko'rinadi)" />
             <Toggle checked={f.isFeatured} onChange={(v) => set("isFeatured", v)} label="Bosh sahifa bannerida" />

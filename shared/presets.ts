@@ -6,7 +6,7 @@ import type { PipelineStep } from "./schema";
  * Model nomlari fal.ai endpoint identifikatorlari.
  */
 export const PIPELINE_PRESETS: Record<
-  "character_replace" | "effect" | "photoshoot",
+  "character_replace" | "multi_character" | "effect" | "photoshoot",
   { title: string; description: string; needsSourceVideo: boolean; steps: PipelineStep[] }
 > = {
   character_replace: {
@@ -21,6 +21,27 @@ export const PIPELINE_PRESETS: Record<
         input: { video_url: "{{template_video}}", image_url: "{{user_image}}", resolution: "720p" },
         output: "video",
         costUsd: 0.4,
+      },
+    ],
+  },
+  multi_character: {
+    title: "Ko'p personajli video (2–4 kishi)",
+    description:
+      "Videodagi bir nechta personaj mijozlar rasmlari bilan almashtiriladi, harakat va kamera saqlanadi (Kling O1 Video Edit). Asl video MP4/MOV, 3–10 soniya, 720p+ bo'lishi shart. Promptda @Image1, @Image2 — mijoz rasmlari tartibi.",
+    needsSourceVideo: true,
+    steps: [
+      {
+        label: "Personajlarni almashtirish",
+        endpoint: "fal-ai/kling-video/o1/video-to-video/edit",
+        input: {
+          prompt:
+            "Replace the person on the left with @Image1 and the person on the right with @Image2. Keep the exact motion, timing, camera movement, background and lighting of the original video. Keep the exact face and identity of each referenced person.",
+          video_url: "{{template_video}}",
+          image_urls: ["{{user_image_1}}", "{{user_image_2}}"],
+          keep_audio: true,
+        },
+        output: "video",
+        costUsd: 1.0,
       },
     ],
   },
@@ -76,6 +97,7 @@ export const PIPELINE_PRESETS: Record<
 
 export const KIND_LABELS: Record<string, string> = {
   character_replace: "Qahramon almashtirish",
+  multi_character: "Ko'p personajli video",
   effect: "Effekt",
   photoshoot: "Fotosessiya",
   custom: "Maxsus",
@@ -154,4 +176,23 @@ export function buildStepsFromAnalysis(
     },
     { label: "Jonlantirish", endpoint: "fal-ai/kling-video/v2.5-turbo/pro/image-to-video", input: { prompt: motion, image_url: "{{prev}}", duration: "5" }, output: "video", costUsd: 0.35 },
   ];
+}
+
+/**
+ * Ko'p personajli video: tanlangan personajlarning har biri mijozning alohida rasmi bilan almashtiriladi.
+ * Tartib muhim: 1-tanlangan personaj → @Image1 → {{user_image_1}} va h.k.
+ */
+export function buildMultiCharacterSteps(a: AnalysisLike, characterIds: number[]): PipelineStep[] {
+  const chosen = characterIds.map((id) => a.characters.find((c) => c.id === id)).filter(Boolean) as AnalysisLike["characters"];
+  const parts = chosen.map((c, i) => `${c.descriptionEn} with @Image${i + 1}`);
+  const list = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : parts[0] || "the main person with @Image1";
+  const base = PIPELINE_PRESETS.multi_character.steps[0];
+  return [{
+    ...base,
+    input: {
+      ...base.input,
+      prompt: `Replace ${list}. Keep the exact motion, timing, camera movement, background and lighting of the original video. Keep the exact face and identity of each referenced person; do not change any other people.`,
+      image_urls: chosen.map((_, i) => `{{user_image_${i + 1}}}`),
+    },
+  }];
 }

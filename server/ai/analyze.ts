@@ -109,7 +109,12 @@ function mockAnalysis(mediaType: "video" | "image"): TemplateAnalysis {
     allowAnimals: mediaType === "video",
     scene: "A colorful studio background with soft bokeh lights, vertical 9:16 framing, vibrant cinematic style.",
     motion: "The character dances energetically in place, smiling, while the camera slowly pushes in.",
-    characters: [{ id: 1, labelUz: "Markazdagi qahramon", descriptionEn: "the character in the center of the frame", type: "human", frame: 0, box: [300, 250, 700, 750], isMain: true }],
+    characters: mediaType === "video"
+      ? [
+          { id: 1, labelUz: "Chapdagi qahramon", descriptionEn: "the person on the left side of the frame", type: "human", frame: 0, box: [280, 80, 760, 480], isMain: true },
+          { id: 2, labelUz: "O'ngdagi qahramon", descriptionEn: "the person on the right side of the frame", type: "human", frame: 0, box: [300, 520, 760, 920], isMain: false },
+        ]
+      : [{ id: 1, labelUz: "Markazdagi qahramon", descriptionEn: "the character in the center of the frame", type: "human", frame: 0, box: [300, 250, 700, 750], isMain: true }],
     mainCharacterId: 1,
     warningsUz: ["Bu SINOV tahlili: OPENROUTER_API_KEY ulanmagan, natija haqiqiy emas"],
   }, 1, "mock");

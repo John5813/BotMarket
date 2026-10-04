@@ -16,7 +16,7 @@ export function parse<T extends z.ZodTypeAny>(schema: T, data: unknown): z.infer
 
 export const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 60 * 1024 * 1024, files: 4 },
+  limits: { fileSize: 60 * 1024 * 1024, files: 8 },
 });
 
 export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction) {
@@ -38,6 +38,7 @@ export function templateDto(t: Template) {
     id: t.id, slug: t.slug, title: t.title, description: t.description, categoryId: t.categoryId, kind: t.kind,
     previewUrl: publicUrl(t.previewPath), previewIsVideo: isVideo(t.previewPath), posterUrl: publicUrl(t.posterPath),
     creditCost: t.creditCost, allowAnimals: t.allowAnimals, inputHint: t.inputHint,
+    inputSlots: t.inputSlots.length ? t.inputSlots : [{ label: "Rasmingiz" }],
     isFeatured: t.isFeatured, isNew: t.isNew, usageCount: t.usageCount,
   };
 }
