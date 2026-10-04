@@ -175,7 +175,11 @@ export type AnalysisLike = {
   scene: string;
   motion: string;
   characters: { id: number; descriptionEn: string; type: "human" | "animal" }[];
+  /** Admin ko'rsatmasidan kelgan qo'shimcha talablar — har bir promptga qo'shiladi */
+  extraPromptEn?: string;
 };
+
+const withExtra = (prompt: string, a: AnalysisLike) => (a.extraPromptEn?.trim() ? `${prompt} ${a.extraPromptEn.trim()}` : prompt);
 
 const KEEP_FACE = "Keep the exact face, identity, skin tone and hairstyle of the person from the user's photo. Photorealistic, high detail.";
 
@@ -185,7 +189,7 @@ export function buildStepsFromAnalysis(
 ): PipelineStep[] {
   const ch = a.characters.find((c) => c.id === opts.characterId) || a.characters[0];
   const who = ch?.descriptionEn || "the main character";
-  const motion = a.motion || "The person looks at the camera and smiles naturally, subtle camera push-in";
+  const motion = withExtra(a.motion || "The person looks at the camera and smiles naturally, subtle camera push-in", a);
 
   if (opts.kind === "motion_control" && opts.mediaType === "video") {
     const [edit, motionStep] = PIPELINE_PRESETS.motion_control.steps;
@@ -194,7 +198,7 @@ export function buildStepsFromAnalysis(
         ...edit,
         input: {
           ...edit.input,
-          prompt: `In the first image, replace ${who} with the person from the second image (face, hair, body shape). Keep the exact same pose, position, framing, lighting, background and composition of the first image. Scene: ${a.scene || "unchanged"}. ${KEEP_FACE}`,
+          prompt: withExtra(`In the first image, replace ${who} with the person from the second image (face, hair, body shape). Keep the exact same pose, position, framing, lighting, background and composition of the first image; do not change any other people. Scene: ${a.scene || "unchanged"}. ${KEEP_FACE}`, a),
         },
       },
       motionStep,
@@ -211,7 +215,7 @@ export function buildStepsFromAnalysis(
       label: "Personajni almashtirish",
       endpoint: "fal-ai/nano-banana/edit",
       input: {
-        prompt: `In the first image, replace ${who} with the person from the second image. Keep the pose, clothing, composition, lighting, colors and style of the first image unchanged. ${KEEP_FACE}`,
+        prompt: withExtra(`In the first image, replace ${who} with the person from the second image. Keep the pose, clothing, composition, lighting, colors and style of the first image unchanged. ${KEEP_FACE}`, a),
         image_urls: ["{{template_image}}", "{{user_image}}"],
       },
       output: "image",
@@ -231,7 +235,7 @@ export function buildStepsFromAnalysis(
       label: "Sahnaga joylash",
       endpoint: "fal-ai/nano-banana/edit",
       input: {
-        prompt: `Place the person from the photo into this scene as ${who}. Scene: ${a.scene || "the same setting as the template"}. Vertical 9:16 frame. ${KEEP_FACE}`,
+        prompt: withExtra(`Place the person from the photo into this scene as ${who}. Scene: ${a.scene || "the same setting as the template"}. Vertical 9:16 frame. ${KEEP_FACE}`, a),
         image_urls: ["{{user_image}}"],
       },
       output: "image",
@@ -254,7 +258,7 @@ export function buildMultiCharacterSteps(a: AnalysisLike, characterIds: number[]
     ...base,
     input: {
       ...base.input,
-      prompt: `Replace ${list}. Keep the exact motion, timing, camera movement, background and lighting of the original video. Keep the exact face and identity of each referenced person; do not change any other people.`,
+      prompt: withExtra(`Replace ${list}. Keep the exact motion, timing, camera movement, background and lighting of the original video. Keep the exact face and identity of each referenced person; do not change any other people.`, a),
       image_urls: chosen.map((_, i) => `{{user_image_${i + 1}}}`),
     },
   }];

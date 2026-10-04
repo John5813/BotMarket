@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Sparkles, PenLine, User, PawPrint, TriangleAlert, ChevronLeft, Film, Image as ImageIcon } from "lucide-react";
+import { Sparkles, PenLine, User, PawPrint, TriangleAlert, ChevronLeft, Film, Image as ImageIcon, Target, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
 import { FACE_SWAP_VARIANT, MAIN_VARIANT_LABEL, buildMultiCharacterSteps, buildStepsFromAnalysis } from "@shared/presets";
 import type { InputSlot, PipelineStep, TemplateVariant } from "@shared/schema";
@@ -10,7 +10,8 @@ export type Analysis = {
   recommendedKind: "character_replace" | "effect" | "photoshoot"; allowAnimals: boolean;
   scene: string; motion: string;
   characters: { id: number; labelUz: string; descriptionEn: string; type: "human" | "animal"; frame: number; box: [number, number, number, number] | null; isMain: boolean }[];
-  mainCharacterId: number | null; warningsUz: string[]; model: string; mock?: boolean;
+  mainCharacterId: number | null; targetCharacterIds: number[]; extraPromptEn: string; instructionNoteUz: string;
+  warningsUz: string[]; model: string; mock?: boolean;
 };
 
 export type WizardResult = {
@@ -41,7 +42,7 @@ function once(el: HTMLElement, ev: string, timeout = 8000) {
 }
 
 /**
- * Brauzerning o'zida videodan 4 ta kadr (yoki rasmdan 1 ta) ajratib olish.
+ * Brauzerning o'zida videodan 6 ta kadr (yoki rasmdan 1 ta) ajratib olish.
  * first — videoning eng birinchi kadri: Motion Control shu kadrdan boshlanadi, shuning uchun poster aynan u bo'ladi.
  */
 async function extractFrames(file: File): Promise<{ frames: string[]; first: string | null }> {
@@ -67,7 +68,7 @@ async function extractFrames(file: File): Promise<{ frames: string[]; first: str
     await once(v, "seeked");
     const first = drawToJpeg(v, v.videoWidth, v.videoHeight);
     const frames: string[] = [];
-    for (const p of [0.08, 0.35, 0.62, 0.88]) {
+    for (const p of [0.06, 0.22, 0.4, 0.58, 0.76, 0.92]) {
       v.currentTime = Math.max(0, duration * p);
       await once(v, "seeked");
       frames.push(drawToJpeg(v, v.videoWidth, v.videoHeight));
@@ -104,6 +105,7 @@ export function MediaWizard({ open, onClose, onDone }: { open: boolean; onClose:
   const [frames, setFrames] = useState<string[]>([]);
   const [firstFrame, setFirstFrame] = useState<string | null>(null);
   const [withFace, setWithFace] = useState(true);
+  const [instruction, setInstruction] = useState("");
   const [stage, setStage] = useState<"pick" | "frames" | "analyzing" | "result">("pick");
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [charId, setCharId] = useState<number | null>(null);
@@ -113,7 +115,7 @@ export function MediaWizard({ open, onClose, onDone }: { open: boolean; onClose:
 
   useEffect(() => {
     if (!open) return;
-    setFile(null); setPreview(null); setFrames([]); setFirstFrame(null); setWithFace(true); setStage("pick"); setAnalysis(null); setCharId(null); setFrameIdx(0); setMultiIds([]);
+    setFile(null); setPreview(null); setFrames([]); setFirstFrame(null); setWithFace(true); setInstruction(""); setStage("pick"); setAnalysis(null); setCharId(null); setFrameIdx(0); setMultiIds([]);
   }, [open]);
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
 
@@ -141,19 +143,28 @@ export function MediaWizard({ open, onClose, onDone }: { open: boolean; onClose:
     if (!frames.length) return;
     setStage("analyzing");
     try {
-      const a = await api<Analysis>("/api/admin/analyze", { body: { mediaType, frames } });
+      const a = await api<Analysis>("/api/admin/analyze", { body: { mediaType, frames, instruction: instruction.trim() } });
       setAnalysis(a);
       setCharId(a.mainCharacterId);
       const rk = a.recommendedKind;
       const humans = a.characters.filter((c) => c.type === "human");
-      if (mediaType === "video" && a.characters.length >= 2) {
+      const targets = a.targetCharacterIds ?? [];
+      if (instruction.trim() && mediaType === "video" && targets.length >= 2) {
+        // Admin bir nechta aniq personajni ko'rsatgan — aynan ular, aytilgan tartibda
+        setKind("multi_character");
+        setMultiIds(targets.slice(0, MAX_MULTI));
+      } else if (instruction.trim() && targets.length === 1) {
+        // Admin bitta "target" personajni ko'rsatgan — boshqalar qancha bo'lsa ham faqat u almashtiriladi
+        setCharId(targets[0]);
+        setKind(mediaType === "image" ? (rk === "photoshoot" ? "photoshoot" : "effect") : "motion_control");
+      } else if (mediaType === "video" && a.characters.length >= 2) {
         // Bir nechta personaj — ko'p personajli rejim tavsiya qilinadi, asosiylari oldindan belgilanadi
         setKind("multi_character");
         setMultiIds((humans.length >= 2 ? humans : a.characters).slice(0, Math.min(2, MAX_MULTI)).map((c) => c.id));
       } else {
         setKind(mediaType === "image" ? (rk === "photoshoot" ? "photoshoot" : "effect") : rk === "character_replace" ? "motion_control" : "effect");
       }
-      const main = a.characters.find((c) => c.id === a.mainCharacterId);
+      const main = a.characters.find((c) => c.id === (targets[0] ?? a.mainCharacterId));
       setFrameIdx(main?.frame ?? 0);
       setStage("result");
     } catch (e) {
@@ -253,6 +264,9 @@ export function MediaWizard({ open, onClose, onDone }: { open: boolean; onClose:
             </div>
           ) : (
             <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <InstructionBox value={instruction} onChange={setInstruction} />
+              </div>
               <Button size="lg" onClick={analyze} disabled={!frames.length}><Sparkles className="h-5 w-5" />AI tahlil qilsin</Button>
               <Button size="lg" variant="secondary" onClick={() => finish(false)}><PenLine className="h-5 w-5" />Qo'lda kiritaman</Button>
               <button className="text-left text-xs text-white/40 sm:col-span-2" onClick={() => setStage("pick")}>← Boshqa fayl tanlash</button>
@@ -263,6 +277,15 @@ export function MediaWizard({ open, onClose, onDone }: { open: boolean; onClose:
 
       {stage === "result" && analysis && (
         <div className="space-y-5">
+          {analysis.instructionNoteUz && (
+            <div className="flex gap-2 rounded-2xl border border-brand/40 bg-brand/10 p-3 text-sm">
+              <Target className="mt-0.5 h-4 w-4 shrink-0 text-brand-light" />
+              <div>
+                <div>{analysis.instructionNoteUz}</div>
+                {analysis.extraPromptEn && <div className="mt-1 text-xs text-white/50">Promptlarga qo'shiladi: {analysis.extraPromptEn}</div>}
+              </div>
+            </div>
+          )}
           {analysis.warningsUz.length > 0 && (
             <div className="space-y-1 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100">
               {analysis.warningsUz.map((w, i) => <div key={i} className="flex gap-2"><TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />{w}</div>)}
@@ -346,6 +369,14 @@ export function MediaWizard({ open, onClose, onDone }: { open: boolean; onClose:
             <div className="mt-2 text-[11px] text-white/30">Model: {analysis.model}</div>
           </div>
 
+          <details className="rounded-2xl border border-line p-3" open={!!instruction && !analysis.instructionNoteUz}>
+            <summary className="cursor-pointer text-sm font-medium">AI noto'g'ri tanladimi? Ko'rsatma yozib qayta tahlil qiling</summary>
+            <div className="mt-3 space-y-2">
+              <InstructionBox value={instruction} onChange={setInstruction} />
+              <Button variant="secondary" onClick={analyze} disabled={!instruction.trim()}><RefreshCw className="h-4 w-4" />Qayta tahlil qilish</Button>
+            </div>
+          </details>
+
           <div className="flex flex-col gap-2 sm:flex-row">
             <Button className="flex-1" onClick={() => finish(true)}><Sparkles className="h-4 w-4" />Formaga qo'llash</Button>
             <Button variant="secondary" onClick={() => finish(false)}><PenLine className="h-4 w-4" />Qo'lda kiritaman</Button>
@@ -354,5 +385,27 @@ export function MediaWizard({ open, onClose, onDone }: { open: boolean; onClose:
         </div>
       )}
     </Modal>
+  );
+}
+
+const INSTRUCTION_EXAMPLES = [
+  "Sahna o'rtasidagi qizil ko'ylakli qizni almashtir, boshqalarga tegma",
+  "Keyingi kadrdagi kostyumli yigitni almashtir",
+  "Kelin va kuyovni almashtir: 1-rasm kuyov, 2-rasm kelin",
+];
+
+/** Admin AI ga o'z so'zi bilan qaysi personaj kerakligini aytadi */
+function InstructionBox({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div>
+      <label className="label flex items-center gap-1.5"><Target className="h-3.5 w-3.5" />AI uchun ko'rsatma (ixtiyoriy)</label>
+      <textarea className="input min-h-[72px] text-sm" maxLength={1000} value={value} onChange={(e) => onChange(e.target.value)}
+        placeholder="Masalan: videoda ko'p odam bor, lekin faqat sahna o'rtasidagi qizni almashtir. Qo'shimcha talablar ham yozish mumkin" />
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {INSTRUCTION_EXAMPLES.map((ex) => (
+          <button key={ex} type="button" onClick={() => onChange(ex)} className="rounded-full bg-white/5 px-2.5 py-1 text-[11px] text-white/60 hover:bg-white/10">{ex}</button>
+        ))}
+      </div>
+    </div>
   );
 }

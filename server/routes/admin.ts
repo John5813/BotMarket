@@ -375,9 +375,10 @@ adminRouter.post("/analyze", async (req, res) => {
     mediaType: z.enum(["video", "image"]),
     frames: z.array(z.string().regex(/^data:image\/(jpeg|png|webp);base64,/, "Kadr formati noto'g'ri").max(2_000_000, "Kadr juda katta"))
       .min(1, "Kamida bitta kadr kerak").max(6, "Ko'pi bilan 6 ta kadr"),
+    instruction: z.string().trim().max(1000, "Ko'rsatma 1000 belgidan oshmasin").optional().default(""),
   }), req.body);
   try {
-    res.json(await analyzeTemplateMedia(b.frames, b.mediaType));
+    res.json(await analyzeTemplateMedia(b.frames, b.mediaType, b.instruction));
   } catch (e) {
     throw new HttpError(502, (e as Error).message);
   }

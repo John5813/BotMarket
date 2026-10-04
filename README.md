@@ -175,6 +175,14 @@ Sessiya cookie'si production'da faqat HTTPS orqali ishlaydi — SSL sertifikat s
 - Model: **Kling O1 Video Edit** (`fal-ai/kling-video/o1/video-to-video/edit`) — promptda `@Image1`, `@Image2`; asl video **MP4/MOV, 3–10 soniya, 720p+**, ko'pi bilan 4 ta rasm
 - Tannarx yuqoriroq (~$1/video) — narxni 4+ kredit qiling. Endpoint nomi va parametrlarini fal.ai sahifasida tekshirib oling
 
+### AI ga ko'rsatma berish (ko'p odamli sahna)
+Video tanlangandan keyin **"AI uchun ko'rsatma"** maydoniga o'z so'zingiz bilan yozing, masalan:
+- *"Ko'p odam bor, lekin faqat sahna o'rtasidagi qizni almashtir"*
+- *"Keyingi kadrdagi kostyumli yigitni almashtir, kostyum rangi saqlansin"*
+- *"Kelin va kuyovni almashtir: 1-rasm kuyov, 2-rasm kelin"*
+
+AI (videodan 6 ta kadr ko'radi) aynan shu personaj(lar)ni topib belgilaydi, qo'shimcha talablarni inglizchaga o'girib promptlarga qo'shadi va qanday tushunganini yozib ko'rsatadi. 2+ personaj aytilsa — avtomatik "Ko'p personajli" rejim, aytilgan tartibda. Natija yoqmasa, ko'rsatmani o'zgartirib **"Qayta tahlil qilish"** tugmasini bosing.
+
 ### Butun personaj (Motion Control) va «Faqat yuz» varianti
 Viral "AI character swap" usuli — 2 qadam:
 1. Videoning **1-kadrida** odam mijoz bilan almashtiriladi (`fal-ai/nano-banana/edit`, `{{template_frame}}` + `{{user_image}}`)

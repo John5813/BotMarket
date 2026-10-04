@@ -26,6 +26,12 @@ export type TemplateAnalysis = {
   motion: string;
   characters: AnalysisCharacter[];
   mainCharacterId: number | null;
+  /** Admin ko'rsatmasiga ko'ra almashtiriladigan personajlar (tartib = mijoz rasmlari tartibi) */
+  targetCharacterIds: number[];
+  /** Admin ko'rsatmasidan kelib chiqqan qo'shimcha talablar (ingliz tilida), promptlarga qo'shiladi */
+  extraPromptEn: string;
+  /** AI admin ko'rsatmasini qanday tushungani (o'zbekcha) */
+  instructionNoteUz: string;
   warningsUz: string[];
   model: string;
   mock?: boolean;
@@ -53,8 +59,13 @@ Return ONLY a JSON object with exactly these keys:
      "isMain": true for the single most prominent character
   },
   "mainCharacterId": id of the main character or null,
+  "targetCharacterIds": array of character ids that should be replaced by the user's photo(s), in order (first = user's photo 1). Follow the admin instruction if given; otherwise [mainCharacterId],
+  "extraPromptEn": English text with extra requirements from the admin instruction to append to generation prompts (style, outfit, what to keep), or "" if none,
+  "instructionNoteUz": one short Uzbek (Latin) sentence explaining how you understood the admin instruction, or "" if there was no instruction,
   "warningsUz": array of short Uzbek (Latin) warnings for the admin, e.g. several people present, face too small, fast camera cuts, text/logos/watermarks, copyrighted celebrities or music video. Empty array if none.
-}`;
+}
+
+If an ADMIN INSTRUCTION is given, it has priority: identify exactly the characters the admin describes (they may appear only in some frames, e.g. "the man in a suit in the next frame"), make sure each of them is in "characters" with an accurate box, put them into "targetCharacterIds" in the order the admin mentions them, and set "mainCharacterId" to the first one. If you cannot find a described character, say so in "warningsUz".`;
 
 function clamp(n: unknown, lo: number, hi: number, d: number) {
   const v = Number(n);
@@ -76,7 +87,10 @@ function normalize(raw: any, frameCount: number, model: string): TemplateAnalysi
       isMain: Boolean(c?.isMain),
     };
   });
-  const mainId = chars.find((c) => c.id === Number(raw?.mainCharacterId))?.id ?? chars.find((c) => c.isMain)?.id ?? chars[0]?.id ?? null;
+  const ids = new Set(chars.map((c) => c.id));
+  const targets: number[] = [...new Set<number>((Array.isArray(raw?.targetCharacterIds) ? raw.targetCharacterIds : []).map(Number))]
+    .filter((id) => ids.has(id)).slice(0, 4);
+  const mainId = targets[0] ?? chars.find((c) => c.id === Number(raw?.mainCharacterId))?.id ?? chars.find((c) => c.isMain)?.id ?? chars[0]?.id ?? null;
   return {
     titleUz: String(raw?.titleUz || "Yangi shablon").slice(0, 80),
     descriptionUz: String(raw?.descriptionUz || "").slice(0, 300),
@@ -87,6 +101,9 @@ function normalize(raw: any, frameCount: number, model: string): TemplateAnalysi
     motion: String(raw?.motion || "").slice(0, 600),
     characters: chars.map((c) => ({ ...c, isMain: c.id === mainId })),
     mainCharacterId: mainId,
+    targetCharacterIds: targets.length ? targets : mainId ? [mainId] : [],
+    extraPromptEn: String(raw?.extraPromptEn || "").slice(0, 400),
+    instructionNoteUz: String(raw?.instructionNoteUz || "").slice(0, 300),
     warningsUz: (Array.isArray(raw?.warningsUz) ? raw.warningsUz : []).map(String).slice(0, 6),
     model,
   };
@@ -100,8 +117,13 @@ function parseJson(text: string) {
 }
 
 /** Kalit bo'lmaganda interfeysni sinash uchun namunaviy natija */
-function mockAnalysis(mediaType: "video" | "image"): TemplateAnalysis {
+function mockAnalysis(mediaType: "video" | "image", instruction: string): TemplateAnalysis {
+  // Sinov: ko'rsatmada "o'ng" yoki "ikkinchi" so'zi bo'lsa — o'ngdagi personaj tanlangandek ko'rsatiladi
+  const right = /o'ng|ong|ikkinchi|right|second/i.test(instruction);
   return normalize({
+    targetCharacterIds: mediaType === "video" && right ? [2] : [1],
+    extraPromptEn: instruction ? `Admin note: ${instruction}` : "",
+    instructionNoteUz: instruction ? `SINOV: ko'rsatma qabul qilindi — ${right ? "o'ngdagi" : "chapdagi"} personaj tanlandi` : "",
     titleUz: mediaType === "video" ? "Yangi raqs" : "Yangi portret",
     descriptionUz: "Siz ham shu videodagi qahramon kabi harakat qilasiz!",
     inputHintUz: "Butun gavdangiz yoki yuzingiz aniq ko'ringan rasm yuklang",
@@ -120,11 +142,12 @@ function mockAnalysis(mediaType: "video" | "image"): TemplateAnalysis {
   }, 1, "mock");
 }
 
-export async function analyzeTemplateMedia(frames: string[], mediaType: "video" | "image"): Promise<TemplateAnalysis> {
-  if (!env.openrouter.key) return { ...mockAnalysis(mediaType), mock: true };
+export async function analyzeTemplateMedia(frames: string[], mediaType: "video" | "image", instruction = ""): Promise<TemplateAnalysis> {
+  if (!env.openrouter.key) return { ...mockAnalysis(mediaType, instruction), mock: true };
 
   const content = [
-    { type: "text", text: `Media type: ${mediaType}. ${frames.length} frame(s) follow in chronological order (frame 0 first).` },
+    { type: "text", text: `Media type: ${mediaType}. ${frames.length} frame(s) follow in chronological order (frame 0 first).` +
+      (instruction ? `\n\nADMIN INSTRUCTION (may be in Uzbek; follow it):\n"""${instruction}"""` : "") },
     ...frames.map((url) => ({ type: "image_url", image_url: { url } })),
   ];
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
