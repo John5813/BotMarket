@@ -27,6 +27,12 @@ export const env = {
   aiMode: (process.env.AI_MODE || (process.env.FAL_KEY ? "fal" : "mock")) as "fal" | "mock",
   workerConcurrency: Number(process.env.WORKER_CONCURRENCY || 4),
 
+  // Admin "AI tahlil" (shablon videosini ko'rib personaj va promptlarni taklif qiladi)
+  openrouter: {
+    key: process.env.OPENROUTER_API_KEY || "",
+    model: process.env.OPENROUTER_MODEL || "google/gemini-3.8-flash",
+  },
+
   payme: {
     merchantId: process.env.PAYME_MERCHANT_ID || "",
     key: process.env.PAYME_KEY || "",

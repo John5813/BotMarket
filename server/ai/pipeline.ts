@@ -22,8 +22,8 @@ export function resolveInput(value: unknown, vars: PipelineVars): unknown {
 
 function lookup(key: string, vars: PipelineVars): string {
   if (key === "user_image") return vars.user_image;
-  if (key === "template_video") {
-    if (!vars.template_video) throw new Error("Shablonda asl video yuklanmagan ({{template_video}})");
+  if (key === "template_video" || key === "template_image") {
+    if (!vars.template_video) throw new Error(`Shablonda asl media yuklanmagan ({{${key}}})`);
     return vars.template_video;
   }
   if (key === "prev") {
@@ -55,8 +55,10 @@ export function finalStepIndexes(steps: PipelineStep[]) {
   return marked.length ? marked : [steps.length - 1];
 }
 
+/** Retsept shablonning asl mediasini ({{template_video}} yoki {{template_image}}) ishlatadimi */
 export function usesTemplateVideo(steps: PipelineStep[]) {
-  return JSON.stringify(steps).includes("{{template_video}}");
+  const s = JSON.stringify(steps);
+  return s.includes("{{template_video}}") || s.includes("{{template_image}}");
 }
 
 export function estimateCostUsd(steps: PipelineStep[]) {

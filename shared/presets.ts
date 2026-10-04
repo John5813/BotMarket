@@ -95,3 +95,63 @@ export const STATUS_LABELS: Record<string, string> = {
 export function formatUzs(n: number) {
   return new Intl.NumberFormat("ru-RU").format(n).replace(/,/g, " ") + " so'm";
 }
+
+// ---------------------------------------------------------------------------
+// AI tahlil natijasidan retsept (qadamlar va promptlar) yig'ish.
+// Admin keyin hammasini qo'lda o'zgartirishi mumkin.
+// ---------------------------------------------------------------------------
+export type AnalysisLike = {
+  scene: string;
+  motion: string;
+  characters: { id: number; descriptionEn: string; type: "human" | "animal" }[];
+};
+
+const KEEP_FACE = "Keep the exact face, identity, skin tone and hairstyle of the person from the user's photo. Photorealistic, high detail.";
+
+export function buildStepsFromAnalysis(
+  a: AnalysisLike,
+  opts: { mediaType: "video" | "image"; kind: "character_replace" | "effect" | "photoshoot"; characterId: number | null },
+): PipelineStep[] {
+  const ch = a.characters.find((c) => c.id === opts.characterId) || a.characters[0];
+  const who = ch?.descriptionEn || "the main character";
+  const motion = a.motion || "The person looks at the camera and smiles naturally, subtle camera push-in";
+
+  if (opts.kind === "character_replace" && opts.mediaType === "video") {
+    return [{ ...PIPELINE_PRESETS.character_replace.steps[0], label: `Almashtirish: ${who}`.slice(0, 60) }];
+  }
+
+  if (opts.mediaType === "image") {
+    // Shablon rasmidagi tanlangan personaj o'rniga mijoz qo'yiladi
+    const swap: PipelineStep = {
+      label: "Personajni almashtirish",
+      endpoint: "fal-ai/nano-banana/edit",
+      input: {
+        prompt: `In the first image, replace ${who} with the person from the second image. Keep the pose, clothing, composition, lighting, colors and style of the first image unchanged. ${KEEP_FACE}`,
+        image_urls: ["{{template_image}}", "{{user_image}}"],
+      },
+      output: "image",
+      final: opts.kind === "photoshoot",
+      costUsd: 0.04,
+    };
+    if (opts.kind === "photoshoot") return [swap];
+    return [
+      swap,
+      { label: "Jonlantirish", endpoint: "fal-ai/kling-video/v2.5-turbo/pro/image-to-video", input: { prompt: motion, image_url: "{{prev}}", duration: "5" }, output: "video", costUsd: 0.35 },
+    ];
+  }
+
+  // Video + effekt: sahna mijoz rasmidan qayta yaratiladi, keyin harakatlantiriladi
+  return [
+    {
+      label: "Sahnaga joylash",
+      endpoint: "fal-ai/nano-banana/edit",
+      input: {
+        prompt: `Place the person from the photo into this scene as ${who}. Scene: ${a.scene || "the same setting as the template"}. Vertical 9:16 frame. ${KEEP_FACE}`,
+        image_urls: ["{{user_image}}"],
+      },
+      output: "image",
+      costUsd: 0.04,
+    },
+    { label: "Jonlantirish", endpoint: "fal-ai/kling-video/v2.5-turbo/pro/image-to-video", input: { prompt: motion, image_url: "{{prev}}", duration: "5" }, output: "video", costUsd: 0.35 },
+  ];
+}

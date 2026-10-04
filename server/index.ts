@@ -39,6 +39,7 @@ app.post("/api/payments/payme", express.json({ limit: "100kb" }), paymeHandler);
 app.post("/api/payments/click/prepare", express.urlencoded({ extended: false }), clickPrepare);
 app.post("/api/payments/click/complete", express.urlencoded({ extended: false }), clickComplete);
 
+app.use("/api/admin/analyze", express.json({ limit: "12mb" }));
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: false }));
 

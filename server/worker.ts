@@ -93,7 +93,7 @@ async function advance(gen: Generation) {
     const input = resolveInput(step.input, { user_image: inputUrl, template_video: templateVideo, results }) as Record<string, unknown>;
     const isVideoPreview = t.previewPath && /\.(mp4|webm|mov)$/i.test(t.previewPath);
     const requestId = await ai.submit(step.endpoint, input, {
-      mockVideoPath: isVideoPreview ? t.previewPath : t.sourceVideoPath,
+      mockVideoPath: isVideoPreview ? t.previewPath : t.sourceVideoPath && /\.(mp4|webm|mov)$/i.test(t.sourceVideoPath) ? t.sourceVideoPath : null,
     });
     await db.update(generations).set({ currentRequestId: requestId, currentEndpoint: step.endpoint, lockedAt: new Date() })
       .where(eq(generations.id, gen.id));

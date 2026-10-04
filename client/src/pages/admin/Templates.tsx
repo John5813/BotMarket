@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, Save, FlaskConical, Info, Zap, Upload, ChevronLeft, Copy } from "lucide-react";
+import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, Save, FlaskConical, Info, Zap, Upload, ChevronLeft, Copy, Sparkles } from "lucide-react";
 import { PIPELINE_PRESETS, KIND_LABELS } from "@shared/presets";
 import type { PipelineStep } from "@shared/schema";
 import { api, formatUzs, queryClient } from "@/lib/api";
-import { Badge, Button, Card, Empty, Modal, PageLoader, Toggle, clsx, useToast } from "@/components/ui";
+import { Badge, Button, Card, Empty, Modal, NumInput, PageLoader, Toggle, clsx, useToast } from "@/components/ui";
 import { PageHead } from "./AdminLayout";
+import { MediaWizard, type WizardResult } from "./MediaWizard";
 
 type AdminTemplate = {
   id: number; slug: string; title: string; description: string; categoryId: number | null; kind: keyof typeof KIND_LABELS | string;
-  previewUrl: string | null; posterUrl: string | null; sourceVideoUrl: string | null; previewPath: string | null;
+  previewUrl: string | null; posterUrl: string | null; sourceVideoUrl: string | null; sourceIsVideo?: boolean; previewPath: string | null;
   steps: PipelineStep[]; creditCost: number; allowAnimals: boolean; inputHint: string; isActive: boolean; isFeatured: boolean;
   isNew: boolean; sortOrder: number; usageCount: number; estimatedCostUsd: number;
 };
@@ -133,7 +134,14 @@ function StepEditor({ steps, onChange }: { steps: PipelineStep[]; onChange: (s: 
   const [raw, setRaw] = useState(false);
   const [rawText, setRawText] = useState("");
   const [drafts, setDrafts] = useState<string[]>([]);
-  useEffect(() => { setDrafts(steps.map((s) => JSON.stringify(s.input, null, 2))); }, [steps.length]); // eslint-disable-line
+  // Qadamlar tashqaridan o'zgarsa (andoza, AI tahlil) — matn maydonlarini yangilaymiz,
+  // admin hozir yozayotgan (mos keladigan) matnga tegmaymiz
+  useEffect(() => {
+    setDrafts((prev) => steps.map((s, i) => {
+      try { if (prev[i] !== undefined && JSON.stringify(JSON.parse(prev[i])) === JSON.stringify(s.input)) return prev[i]; } catch { /* yozilmoqda */ }
+      return JSON.stringify(s.input, null, 2);
+    }));
+  }, [steps]);
 
   const update = (i: number, patch: Partial<PipelineStep>) => onChange(steps.map((s, k) => (k === i ? { ...s, ...patch } : s)));
   const move = (i: number, d: -1 | 1) => {
@@ -171,7 +179,7 @@ function StepEditor({ steps, onChange }: { steps: PipelineStep[]; onChange: (s: 
             <div><div className="label">Model (fal.ai endpoint)</div><input className="input font-mono text-xs" value={s.endpoint} onChange={(e) => update(i, { endpoint: e.target.value.trim() })} /></div>
             <div><div className="label">Natija</div>
               <select className="input" value={s.output} onChange={(e) => update(i, { output: e.target.value as "video" | "image" })}><option value="video">Video</option><option value="image">Rasm</option></select></div>
-            <div><div className="label">Narxi ($)</div><input className="input" type="number" step="0.01" min="0" value={s.costUsd ?? 0} onChange={(e) => update(i, { costUsd: Number(e.target.value) })} /></div>
+            <div><div className="label">Narxi ($)</div><NumInput decimal value={s.costUsd ?? 0} onChange={(n) => update(i, { costUsd: n })} /></div>
           </div>
           <div className="mt-3">
             <div className="label">Kirish parametrlari (JSON)</div>
@@ -205,19 +213,36 @@ export function AdminTemplateEditor() {
   const [testOpen, setTestOpen] = useState(false);
   const [testFile, setTestFile] = useState<File | null>(null);
   const [testing, setTesting] = useState(false);
+  const [wizard, setWizard] = useState(isNew);
 
   useEffect(() => {
     if (existing) {
-      const { id: _i, previewUrl: _p, posterUrl: _po, sourceVideoUrl: _s, previewPath: _pp, usageCount: _u, estimatedCostUsd: _e, ...rest } = existing;
+      const { id: _i, previewUrl: _p, posterUrl: _po, sourceVideoUrl: _s, sourceIsVideo: _sv, previewPath: _pp, usageCount: _u, estimatedCostUsd: _e, ...rest } = existing;
       setF(rest as Form);
     }
   }, [existing]);
 
   if (!isNew && isLoading) return <PageLoader />;
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((s) => ({ ...s, [k]: v }));
-  const needsVideo = JSON.stringify(f.steps).includes("{{template_video}}");
+  const needsVideo = /\{\{template_(video|image)\}\}/.test(JSON.stringify(f.steps));
   const costUsd = f.steps.reduce((s, x) => s + (Number(x.costUsd) || 0), 0);
   const costUzs = Math.round(costUsd * (settings?.values.usdToUzs || 12500));
+
+  function applyWizard(r: WizardResult) {
+    setFiles((s) => ({ ...s, preview: r.file, sourceVideo: r.file, poster: r.poster ?? s.poster }));
+    if (r.fill) {
+      const fill = r.fill;
+      setF((s) => ({
+        ...s,
+        title: fill.title || s.title, description: fill.description || s.description, inputHint: fill.inputHint || s.inputHint,
+        allowAnimals: fill.allowAnimals, kind: fill.kind, steps: fill.steps,
+      }));
+    } else if (r.mediaType === "video" && isNew) {
+      setF((s) => ({ ...s, kind: "character_replace", allowAnimals: true, steps: JSON.parse(JSON.stringify(PIPELINE_PRESETS.character_replace.steps)) }));
+    }
+    setWizard(false);
+    toast(r.fill?.title ? "AI taklifi formaga qo'llandi — tekshirib, saqlang" : "Media qo'shildi — ma'lumotlarni kiriting");
+  }
 
   function applyPreset(kind: Form["kind"]) {
     set("kind", kind);
@@ -268,6 +293,7 @@ export function AdminTemplateEditor() {
       <Link href="/admin/templates" className="mb-3 inline-flex items-center gap-1 text-sm text-white/50 hover:text-white"><ChevronLeft className="h-4 w-4" />Shablonlar</Link>
       <PageHead title={isNew ? "Yangi shablon" : f.title || "Shablon"} subtitle={isNew ? "Avval ma'lumotlarni to'ldiring, saqlang, keyin sinab ko'ring" : `/${f.slug}`}
         action={<div className="flex gap-2">
+          <Button variant="secondary" onClick={() => setWizard(true)}><Sparkles className="h-4 w-4" />AI tahlil</Button>
           {!isNew && <Button variant="secondary" onClick={() => setTestOpen(true)}><FlaskConical className="h-4 w-4" />Sinab ko'rish</Button>}
           <Button loading={saving} onClick={save}><Save className="h-4 w-4" />Saqlash</Button>
         </div>} />
@@ -286,8 +312,8 @@ export function AdminTemplateEditor() {
                   <option value="">— tanlanmagan —</option>
                   {cats?.map((c) => <option key={c.id} value={c.id}>{c.emoji} {c.title}</option>)}
                 </select></div>
-              <div><label className="label">Narxi (kredit)</label><input className="input" type="number" min={0} value={f.creditCost} onChange={(e) => set("creditCost", Number(e.target.value))} /></div>
-              <div><label className="label">Tartib raqami</label><input className="input" type="number" value={f.sortOrder} onChange={(e) => set("sortOrder", Number(e.target.value))} /></div>
+              <div><label className="label">Narxi (kredit)</label><NumInput value={f.creditCost} onChange={(n) => set("creditCost", n)} /></div>
+              <div><label className="label">Tartib raqami</label><NumInput value={f.sortOrder} onChange={(n) => set("sortOrder", n)} /></div>
             </div>
             <div><label className="label">Mijozga maslahat</label><input className="input" value={f.inputHint} onChange={(e) => set("inputHint", e.target.value)} placeholder="Masalan: Butun gavdangiz ko'rinadigan rasm yuklang" /></div>
           </Card>
@@ -305,7 +331,7 @@ export function AdminTemplateEditor() {
               <summary className="flex cursor-pointer items-center gap-2 font-medium text-white/80"><Info className="h-4 w-4" />O'rinbosarlar va maslahatlar</summary>
               <ul className="mt-2 list-disc space-y-1 pl-5">
                 <li><code>{"{{user_image}}"}</code> — mijoz yuklagan rasm</li>
-                <li><code>{"{{template_video}}"}</code> — o'ng tomonda yuklangan asl video</li>
+                <li><code>{"{{template_video}}"}</code> / <code>{"{{template_image}}"}</code> — o'ng tomonda yuklangan asl video yoki rasm</li>
                 <li><code>{"{{prev}}"}</code> — oldingi qadam natijasi, <code>{"{{step_0}}"}</code> — 1-qadam natijasi</li>
                 <li>Promptlarni ingliz tilida yozing va "keep the exact same face" qo'shing — yuz o'xshashligi yaxshilanadi</li>
                 <li>Har bir modelni avval fal.ai Playground'da sinab, eng yaxshi parametrlarni shu yerga ko'chiring</li>
@@ -327,8 +353,8 @@ export function AdminTemplateEditor() {
             <FilePick label="Muqova rasm (ixtiyoriy)" accept="image/jpeg,image/png,image/webp" current={existing?.posterUrl ?? null} file={files.poster}
               onFile={(x) => setFiles((s) => ({ ...s, poster: x }))} hint="Video yuklanguncha ko'rinadi" />
             {(needsVideo || existing?.sourceVideoUrl) && (
-              <FilePick label={`Asl video${needsVideo ? " *" : ""}`} accept="video/mp4,video/webm,video/quicktime" current={existing?.sourceVideoUrl ?? null} file={files.sourceVideo}
-                forceVideo onFile={(x) => setFiles((s) => ({ ...s, sourceVideo: x }))} hint="Bitta raqqos, butun gavda, kamera qimirlamaydi. Mijozlarga ko'rinmaydi" />
+              <FilePick label={`Asl media (video yoki rasm)${needsVideo ? " *" : ""}`} accept="video/mp4,video/webm,video/quicktime,image/jpeg,image/png,image/webp" current={existing?.sourceVideoUrl ?? null} file={files.sourceVideo}
+                forceVideo={existing?.sourceIsVideo} onFile={(x) => setFiles((s) => ({ ...s, sourceVideo: x }))} hint="Bitta raqqos, butun gavda, kamera qimirlamaydi. Mijozlarga ko'rinmaydi" />
             )}
           </Card>
           <Card className="p-5 text-sm">
@@ -345,6 +371,8 @@ export function AdminTemplateEditor() {
           )}
         </div>
       </div>
+
+      <MediaWizard open={wizard} onClose={() => setWizard(false)} onDone={applyWizard} />
 
       <Modal open={testOpen} onClose={() => setTestOpen(false)} title="Shablonni sinab ko'rish">
         <p className="mb-4 text-sm text-white/60">Rasm yuklang — generatsiya sizning hisobingizdan <b>kreditsiz</b> bajariladi (yashirin shablon ham ishlaydi). Haqiqiy AI rejimida fal.ai hisobidan pul yechiladi.</p>
