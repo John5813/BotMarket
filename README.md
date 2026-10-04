@@ -2,7 +2,6 @@
 
 Mijoz trenddagi shablonni tanlaydi, o'z rasmini (yoki uy hayvoni rasmini) yuklaydi va 1–3 daqiqada tayyor AI video/rasm oladi. To'lov — kreditlar orqali (Payme, Click).
 
-TeleMarket loyihasidan **mustaqil** ilova: o'z `package.json`, bazasi va serveri bor.
 
 ---
 
@@ -42,7 +41,6 @@ React 18 + Vite + Tailwind · Express 5 + TypeScript · PostgreSQL + Drizzle ORM
 Kerak: Node.js 20+ (22 tavsiya), PostgreSQL 14+.
 
 ```bash
-cd aikadr
 npm install
 cp .env.example .env          # DATABASE_URL va boshqalarni to'ldiring
 npm run db:push               # jadvallarni yaratadi
@@ -105,7 +103,7 @@ curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt in
 sudo -u postgres psql -c "CREATE USER aikadr WITH PASSWORD 'KUCHLI_PAROL';"
 sudo -u postgres psql -c "CREATE DATABASE aikadr OWNER aikadr;"
 
-cd /opt && git clone <repo> && cd <repo>/aikadr
+cd /opt && git clone <repo> aikadr && cd aikadr
 npm ci && cp .env.example .env && nano .env     # NODE_ENV production uchun to'ldiring
 npm run db:push && npm run seed && npm run build
 npm run make-admin -- +998XXXXXXXXX "Parol" "Ism"
@@ -118,7 +116,7 @@ Description=AIKadr
 After=network.target postgresql.service
 
 [Service]
-WorkingDirectory=/opt/<repo>/aikadr
+WorkingDirectory=/opt/aikadr
 ExecStart=/usr/bin/node dist/server.js
 Environment=NODE_ENV=production
 Restart=always
@@ -147,6 +145,15 @@ Sessiya cookie'si production'da faqat HTTPS orqali ishlaydi — SSL sertifikat s
 `storage/` papkasi (namuna videolar, natijalar) zaxira nusxasini muntazam oling.
 
 ---
+
+## 4.1. Replit'da ishga tushirish
+
+1. Replit'da PostgreSQL bazasini yoqing (`DATABASE_URL` avtomatik qo'shiladi)
+2. **Secrets** bo'limiga `.env.example`dagi kalitlarni qo'shing (`SESSION_SECRET`, `FAL_KEY`, Payme, Click, `PUBLIC_URL`)
+3. Shell'da: `npm install && npm run db:push && npm run seed && npm run make-admin -- +998XXXXXXXXX "Parol" "Ism"`
+4. **Run** — sinov uchun; **Deploy → Reserved VM** — doimiy ishlash uchun (fon worker uzluksiz ishlashi kerak, shuning uchun Autoscale mos emas)
+
+⚠️ Replit deploy'da serverga yozilgan fayllar (yuklangan shablon videolari, natijalar) qayta deploy qilinganda o'chib ketishi mumkin. Jiddiy ishga tushirish uchun VPS (yuqoridagi 4-bo'lim) tavsiya etiladi.
 
 ## 5. Yangi shablon qo'shish
 
@@ -184,7 +191,7 @@ O'rinbosarlar: `{{user_image}}`, `{{template_video}}`, `{{prev}}`, `{{step_0}}`,
 ## Fayl tuzilishi
 
 ```
-aikadr/
+./
 ├── shared/          schema.ts (baza), presets.ts (AI retsept andozalari)
 ├── server/
 │   ├── index.ts     Express server

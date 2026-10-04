@@ -1,52 +1,59 @@
-import { Switch, Route } from "wouter";
-import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { Toaster } from "@/components/ui/toaster";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import NotFound from "@/pages/not-found";
-import Home from "@/pages/Home";
-import Landing from "@/pages/Landing";
-import BotDetail from "@/pages/BotDetail";
-import Admin from "@/pages/Admin";
-import BotRunner from "@/pages/BotRunner";
-import { useAuth } from "@/hooks/use-auth";
+import { Link, Redirect, Route, Switch } from "wouter";
+import type { ReactNode } from "react";
+import { queryClient } from "@/lib/api";
+import { useMe } from "@/lib/hooks";
+import { ToastProvider, Empty, PageLoader } from "@/components/ui";
+import { ClientLayout } from "@/components/ClientLayout";
+import { HomePage, CategoryPage } from "@/pages/Home";
+import { TemplatePage } from "@/pages/TemplatePage";
+import { GenerationPage, MyWorksPage } from "@/pages/Generation";
+import { PricingPage, PaymentReturnPage } from "@/pages/Pricing";
+import { LoginPage, RegisterPage, ProfilePage, TermsPage } from "@/pages/Account";
+import { lazy, Suspense } from "react";
 
-function Router() {
-  const { isLoading, isAuthenticated } = useAuth();
+// Admin panel alohida yuklanadi — oddiy mijozlar uchun sayt tezroq ochiladi
+const AdminRoutes = lazy(() => import("@/pages/admin/AdminRoutes"));
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="flex flex-col items-center gap-4">
-          <div className="h-10 w-10 border-4 border-primary/30 border-t-primary rounded-full animate-spin" />
-          <p className="text-sm text-muted-foreground animate-pulse">Yuklanmoqda...</p>
-        </div>
-      </div>
-    );
-  }
+/** Faqat tizimga kirganlar uchun sahifalar */
+function Private({ children, path }: { children: ReactNode; path: string }) {
+  const { user, isLoading } = useMe();
+  if (isLoading) return <PageLoader />;
+  if (!user) return <Redirect to={`/login?next=${encodeURIComponent(path)}`} />;
+  return <>{children}</>;
+}
 
+function ClientRoutes() {
   return (
-    <Switch>
-      <Route path="/">
-        {isAuthenticated ? <Home /> : <Landing />}
-      </Route>
-      <Route path="/bot/:id" component={BotDetail} />
-      <Route path="/bot/:id/run" component={BotRunner} />
-      <Route path="/admin" component={Admin} />
-      <Route component={NotFound} />
-    </Switch>
+    <ClientLayout>
+      <Switch>
+        <Route path="/" component={HomePage} />
+        <Route path="/c/:slug" component={CategoryPage} />
+        <Route path="/t/:slug" component={TemplatePage} />
+        <Route path="/pricing" component={PricingPage} />
+        <Route path="/terms" component={TermsPage} />
+        <Route path="/g/:id">{(p) => <Private path={`/g/${p.id}`}><GenerationPage /></Private>}</Route>
+        <Route path="/my"><Private path="/my"><MyWorksPage /></Private></Route>
+        <Route path="/profile"><Private path="/profile"><ProfilePage /></Private></Route>
+        <Route path="/payment/:id">{(p) => <Private path={`/payment/${p.id}`}><PaymentReturnPage /></Private>}</Route>
+        <Route><Empty title="Sahifa topilmadi" text="Havola noto'g'ri yoki sahifa o'chirilgan" action={<Link href="/" className="text-brand-light">Bosh sahifaga</Link>} /></Route>
+      </Switch>
+    </ClientLayout>
   );
 }
 
-function App() {
+export function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <Toaster />
-        <Router />
-      </TooltipProvider>
+      <ToastProvider>
+        <Switch>
+          <Route path="/login" component={LoginPage} />
+          <Route path="/register" component={RegisterPage} />
+          <Route path="/admin"><Suspense fallback={<PageLoader />}><AdminRoutes /></Suspense></Route>
+          <Route path="/admin/*"><Suspense fallback={<PageLoader />}><AdminRoutes /></Suspense></Route>
+          <Route component={ClientRoutes} />
+        </Switch>
+      </ToastProvider>
     </QueryClientProvider>
   );
 }
-
-export default App;

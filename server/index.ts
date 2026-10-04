@@ -1,103 +1,87 @@
-import express, { type Request, Response, NextFunction } from "express";
-import { registerRoutes } from "./routes";
-import { serveStatic } from "./static";
-import { createServer } from "http";
+import express from "express";
+import session from "express-session";
+import connectPg from "connect-pg-simple";
+import helmet from "helmet";
+import path from "node:path";
+import fs from "node:fs";
+import { env } from "./env";
+import { pool } from "./db";
+import { loadUser } from "./auth";
+import { publicRouter } from "./routes/public";
+import { clientRouter } from "./routes/client";
+import { adminRouter } from "./routes/admin";
+import { errorHandler } from "./routes/helpers";
+import { paymeHandler } from "./payments/payme";
+import { clickComplete, clickPrepare } from "./payments/click";
+import { startWorker } from "./worker";
 
 const app = express();
-const httpServer = createServer(app);
+if (env.trustProxy) app.set("trust proxy", 1);
+app.disable("x-powered-by");
 
-declare module "http" {
-  interface IncomingMessage {
-    rawBody: unknown;
-  }
-}
-
-app.use(
-  express.json({
-    verify: (req, _res, buf) => {
-      req.rawBody = buf;
+app.use(helmet({
+  contentSecurityPolicy: env.isProd ? {
+    directives: {
+      defaultSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "blob:"],
+      mediaSrc: ["'self'", "blob:"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      connectSrc: ["'self'"],
+      formAction: ["'self'", "https://checkout.paycom.uz", "https://checkout.test.paycom.uz", "https://my.click.uz"],
     },
-  }),
-);
+  } : false,
+  crossOriginEmbedderPolicy: false,
+}));
 
+// To'lov tizimlari callback'lari (sessiyasiz, o'z autentifikatsiyasi bilan)
+app.post("/api/payments/payme", express.json({ limit: "100kb" }), paymeHandler);
+app.post("/api/payments/click/prepare", express.urlencoded({ extended: false }), clickPrepare);
+app.post("/api/payments/click/complete", express.urlencoded({ extended: false }), clickComplete);
+
+app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: false }));
 
-export function log(message: string, source = "express") {
-  const formattedTime = new Date().toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: true,
-  });
+const PgStore = connectPg(session);
+app.use(session({
+  store: new PgStore({ pool, createTableIfMissing: true }),
+  name: "aikadr.sid",
+  secret: env.sessionSecret,
+  resave: false,
+  saveUninitialized: false,
+  rolling: true,
+  cookie: { httpOnly: true, sameSite: "lax", secure: env.isProd, maxAge: 30 * 86_400_000 },
+}));
+app.use(loadUser);
 
-  console.log(`${formattedTime} [${source}] ${message}`);
-}
+// Shablon namunalari (hamma uchun ochiq)
+app.use("/media", express.static(path.join(env.storageDir, "public"), { maxAge: "7d", fallthrough: false }));
 
-app.use((req, res, next) => {
-  const start = Date.now();
-  const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
+app.use("/api", publicRouter);
+app.use("/api/admin", adminRouter);
+app.use("/api", clientRouter);
+app.use("/api", (_req, res) => res.status(404).json({ message: "Topilmadi" }));
+app.use(errorHandler);
 
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
+async function start() {
+  fs.mkdirSync(path.join(env.storageDir, "public"), { recursive: true });
+  fs.mkdirSync(path.join(env.storageDir, "private"), { recursive: true });
 
-  res.on("finish", () => {
-    const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
-      log(logLine);
-    }
-  });
-
-  next();
-});
-
-(async () => {
-  await registerRoutes(httpServer, app);
-
-  app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-
-    console.error("Internal Server Error:", err);
-
-    if (res.headersSent) {
-      return next(err);
-    }
-
-    return res.status(status).json({ message });
-  });
-
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
-  if (process.env.NODE_ENV === "production") {
-    serveStatic(app);
+  if (env.isProd) {
+    const dist = path.resolve(import.meta.dirname, "public");
+    app.use(express.static(dist, { maxAge: "1h", index: false }));
+    app.use((_req, res) => res.sendFile(path.join(dist, "index.html")));
   } else {
-    const { setupVite } = await import("./vite");
-    await setupVite(httpServer, app);
+    const { createServer } = await import("vite");
+    const vite = await createServer({ configFile: path.resolve(import.meta.dirname, "../vite.config.ts"), server: { middlewareMode: true }, appType: "spa" });
+    app.use(vite.middlewares);
   }
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = parseInt(process.env.PORT || "5000", 10);
-  httpServer.listen(
-    {
-      port,
-      host: "0.0.0.0",
-      reusePort: true,
-    },
-    () => {
-      log(`serving on port ${port}`);
-    },
-  );
-})();
+  app.listen(env.port, () => {
+    console.log(`AIKadr ishga tushdi: ${env.publicUrl}`);
+    if (env.testPayments) console.log("⚠️  Sinov to'lovlari YOQILGAN (PAYMENTS_TEST_MODE). Production'da o'chiring!");
+  });
+  if (process.env.DISABLE_WORKER !== "1") startWorker();
+}
+
+start();
