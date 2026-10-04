@@ -4,6 +4,8 @@ export type PipelineVars = {
   user_image: string;
   /** 2-, 3-... rasmlar ({{user_image_2}}, {{user_image_3}}) */
   extra_images?: string[];
+  /** Shablon videosining 1-kadri (muqova rasm) */
+  template_frame?: string | null;
   template_video?: string | null;
   results: StepResult[];
 };
@@ -33,6 +35,10 @@ function lookup(key: string, vars: PipelineVars): string {
   if (key === "template_video" || key === "template_image") {
     if (!vars.template_video) throw new Error(`Shablonda asl media yuklanmagan ({{${key}}})`);
     return vars.template_video;
+  }
+  if (key === "template_frame") {
+    if (!vars.template_frame) throw new Error("Shablonda muqova (1-kadr) rasmi yo'q ({{template_frame}})");
+    return vars.template_frame;
   }
   if (key === "prev") {
     const last = vars.results[vars.results.length - 1];
@@ -92,4 +98,14 @@ export function maxUserImageIndex(steps: PipelineStep[]) {
   let max = 1;
   for (const m of JSON.stringify(steps).matchAll(/\{\{\s*user_image_(\d+)\s*\}\}/g)) max = Math.max(max, Number(m[1]));
   return max;
+}
+
+export function usesTemplateFrame(steps: PipelineStep[]) {
+  return JSON.stringify(steps).includes("{{template_frame}}");
+}
+
+/** Generatsiya uchun variant retsepti: null — asosiy, aks holda variants[].key */
+export function stepsForVariant(t: { steps: PipelineStep[]; variants?: { key: string; steps: PipelineStep[] }[] }, key?: string | null) {
+  if (!key) return t.steps;
+  return t.variants?.find((v) => v.key === key)?.steps ?? [];
 }

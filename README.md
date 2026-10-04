@@ -175,7 +175,18 @@ Sessiya cookie'si production'da faqat HTTPS orqali ishlaydi — SSL sertifikat s
 - Model: **Kling O1 Video Edit** (`fal-ai/kling-video/o1/video-to-video/edit`) — promptda `@Image1`, `@Image2`; asl video **MP4/MOV, 3–10 soniya, 720p+**, ko'pi bilan 4 ta rasm
 - Tannarx yuqoriroq (~$1/video) — narxni 4+ kredit qiling. Endpoint nomi va parametrlarini fal.ai sahifasida tekshirib oling
 
-O'rinbosarlar: `{{user_image}}` (= `{{user_image_1}}`), `{{user_image_2}}`..., `{{template_video}}`, `{{template_image}}`, `{{prev}}`, `{{step_0}}`, `{{step_1}}`...
+### Butun personaj (Motion Control) va «Faqat yuz» varianti
+Viral "AI character swap" usuli — 2 qadam:
+1. Videoning **1-kadrida** odam mijoz bilan almashtiriladi (`fal-ai/nano-banana/edit`, `{{template_frame}}` + `{{user_image}}`)
+2. **Kling Motion Control** (`fal-ai/kling-video/v3/pro/motion-control`) shu kadrni asl videodagi harakat bilan jonlantiradi (`character_orientation: "video"` — 30 soniyagacha)
+
+`{{template_frame}}` — shablonning muqova rasmi. AI tahlil uni videoning eng birinchi kadridan avtomatik oladi; qo'lda yuklasangiz ham aynan 1-kadr bo'lsin.
+
+**Variantlar:** har bir bitta-personajli video shablonga arzon **«Faqat yuz»** variantini qo'shish mumkin (`half-moon-ai/ai-face-swap/faceswapvideo`, ~$0.0008/kadr). Mijoz sahifada ikkala variantni narxi bilan ko'radi va o'zi tanlaydi. Har variantning o'z narxi (kredit) va o'z qadamlari bor — "Mijozga variantlar" bo'limida tahrirlanadi. Face swap parametr nomlarini (`source_face_url`, `target_video_url`) fal.ai sahifasida tekshiring.
+
+Tavsiya narxlar: Butun personaj — 2–3 kredit (~$0.65 tannarx 5 soniyaga), Faqat yuz — 1 kredit (~$0.15).
+
+O'rinbosarlar: `{{user_image}}` (= `{{user_image_1}}`), `{{user_image_2}}`..., `{{template_video}}`, `{{template_image}}`, `{{template_frame}}`, `{{prev}}`, `{{step_0}}`, `{{step_1}}`...
 
 ---
 

@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, Save, FlaskConical, Info, Zap, Upload, ChevronLeft, Copy, Sparkles } from "lucide-react";
-import { PIPELINE_PRESETS, KIND_LABELS } from "@shared/presets";
-import type { InputSlot, PipelineStep } from "@shared/schema";
+import { PIPELINE_PRESETS, KIND_LABELS, FACE_SWAP_VARIANT, MAIN_VARIANT_LABEL } from "@shared/presets";
+import type { InputSlot, PipelineStep, TemplateVariant } from "@shared/schema";
 import { api, formatUzs, queryClient } from "@/lib/api";
 import { Badge, Button, Card, Empty, Modal, NumInput, PageLoader, Toggle, clsx, useToast } from "@/components/ui";
 import { PageHead } from "./AdminLayout";
@@ -12,7 +12,7 @@ import { MediaWizard, type WizardResult } from "./MediaWizard";
 type AdminTemplate = {
   id: number; slug: string; title: string; description: string; categoryId: number | null; kind: keyof typeof KIND_LABELS | string;
   previewUrl: string | null; posterUrl: string | null; sourceVideoUrl: string | null; sourceIsVideo?: boolean; sourceVideoPath?: string | null; previewPath: string | null;
-  steps: PipelineStep[]; inputSlots: InputSlot[]; creditCost: number; allowAnimals: boolean; inputHint: string; isActive: boolean; isFeatured: boolean;
+  steps: PipelineStep[]; inputSlots: InputSlot[]; mainLabel: string; variants: TemplateVariant[]; creditCost: number; allowAnimals: boolean; inputHint: string; isActive: boolean; isFeatured: boolean;
   isNew: boolean; sortOrder: number; usageCount: number; estimatedCostUsd: number;
 };
 type Category = { id: number; title: string; emoji: string };
@@ -103,7 +103,7 @@ export function AdminTemplates() {
 type Form = Omit<AdminTemplate, "id" | "previewUrl" | "posterUrl" | "sourceVideoUrl" | "previewPath" | "usageCount" | "estimatedCostUsd">;
 const EMPTY: Form = {
   title: "", slug: "", description: "", categoryId: null, kind: "effect", steps: PIPELINE_PRESETS.effect.steps,
-  inputSlots: [], creditCost: 1, allowAnimals: false, inputHint: "", isActive: false, isFeatured: false, isNew: true, sortOrder: 0,
+  inputSlots: [], mainLabel: MAIN_VARIANT_LABEL, variants: [], creditCost: 1, allowAnimals: false, inputHint: "", isActive: false, isFeatured: false, isNew: true, sortOrder: 0,
 };
 
 function FilePick({ label, accept, current, file, onFile, hint, forceVideo }: { label: string; accept: string; current: string | null; file: File | null; onFile: (f: File | null) => void; hint?: string; forceVideo?: boolean }) {
@@ -241,6 +241,7 @@ export function AdminTemplateEditor() {
   const [testOpen, setTestOpen] = useState(false);
   const [testFile, setTestFile] = useState<File | null>(null);
   const [testing, setTesting] = useState(false);
+  const [testVariant, setTestVariant] = useState("");
   const [wizard, setWizard] = useState(isNew);
 
   useEffect(() => {
@@ -264,10 +265,12 @@ export function AdminTemplateEditor() {
         ...s,
         title: fill.title || s.title, description: fill.description || s.description, inputHint: fill.inputHint || s.inputHint,
         allowAnimals: fill.allowAnimals, kind: fill.kind, steps: fill.steps, inputSlots: fill.inputSlots,
-        creditCost: fill.kind === "multi_character" ? Math.max(s.creditCost, 4) : s.creditCost,
+        mainLabel: fill.mainLabel || s.mainLabel, variants: fill.variants ?? (fill.kind === "multi_character" ? [] : s.variants),
+        creditCost: fill.kind === "multi_character" ? Math.max(s.creditCost, 4) : fill.variants?.length ? Math.max(s.creditCost, 2) : s.creditCost,
       }));
     } else if (r.mediaType === "video" && isNew) {
-      setF((s) => ({ ...s, kind: "character_replace", allowAnimals: true, steps: JSON.parse(JSON.stringify(PIPELINE_PRESETS.character_replace.steps)) }));
+      setF((s) => ({ ...s, kind: "motion_control", allowAnimals: false, steps: structuredClone(PIPELINE_PRESETS.motion_control.steps),
+        mainLabel: MAIN_VARIANT_LABEL, variants: [structuredClone(FACE_SWAP_VARIANT)], creditCost: Math.max(s.creditCost, 2) }));
     }
     setWizard(false);
     toast(r.fill?.title ? "AI taklifi formaga qo'llandi — tekshirib, saqlang" : "Media qo'shildi — ma'lumotlarni kiriting");
@@ -279,8 +282,9 @@ export function AdminTemplateEditor() {
     if (preset && (isNew || confirm(`"${preset.title}" andozasi qadamlarini qo'llaymi? Hozirgi qadamlar almashtiriladi.`))) {
       set("steps", JSON.parse(JSON.stringify(preset.steps)));
       if (kind === "character_replace") set("allowAnimals", true);
+      if (kind === "motion_control") setF((s) => ({ ...s, creditCost: Math.max(s.creditCost, 2) }));
       if (kind === "multi_character") {
-        setF((s) => ({ ...s, creditCost: Math.max(s.creditCost, 4),
+        setF((s) => ({ ...s, creditCost: Math.max(s.creditCost, 4), variants: [],
           inputSlots: s.inputSlots.length >= 2 ? s.inputSlots : [{ label: "1-personaj" }, { label: "2-personaj" }] }));
       }
     }
@@ -311,6 +315,7 @@ export function AdminTemplateEditor() {
     form.append("templateSlug", existing.slug);
     form.append("consent", "true");
     form.append("photo", testFile);
+    if (testVariant) form.append("variant", testVariant);
     setTesting(true);
     try {
       const r = await api<{ id: string }>("/api/generations?test=1", { form });
@@ -320,6 +325,18 @@ export function AdminTemplateEditor() {
   }
 
   const preset = PIPELINE_PRESETS[f.kind as keyof typeof PIPELINE_PRESETS];
+  const hasFace = f.variants.some((v) => v.key === FACE_SWAP_VARIANT.key);
+  const faceAllowed = f.kind !== "multi_character" && f.inputSlots.length <= 1;
+  function toggleFace(on: boolean) {
+    setF((s) => ({
+      ...s,
+      variants: on ? [...s.variants, structuredClone(FACE_SWAP_VARIANT)] : s.variants.filter((v) => v.key !== FACE_SWAP_VARIANT.key),
+      creditCost: on ? Math.max(s.creditCost, 2) : s.creditCost,
+    }));
+  }
+  const setVariant = (i: number, patch: Partial<TemplateVariant>) =>
+    setF((s) => ({ ...s, variants: s.variants.map((v, k) => (k === i ? { ...v, ...patch } : v)) }));
+  const variantCost = (v: TemplateVariant) => v.steps.reduce((a, x) => a + (Number(x.costUsd) || 0), 0);
   const klingO1 = JSON.stringify(f.steps).includes("kling-video/o1");
   const sourceNotMp4 = files.sourceVideo ? !/^video\/(mp4|quicktime)$/.test(files.sourceVideo.type)
     : !!existing?.sourceVideoUrl && !!existing.sourceIsVideo && !/\.(mp4|mov)$/i.test(existing.sourceVideoPath || "");
@@ -372,11 +389,43 @@ export function AdminTemplateEditor() {
                 <li><code>{"{{user_image}}"}</code> — mijoz yuklagan rasm. Bir nechta rasm joyi bo'lsa: <code>{"{{user_image_1}}"}</code>, <code>{"{{user_image_2}}"}</code>...</li>
                 <li>Kling O1 promptida mijoz rasmlari <code>@Image1</code>, <code>@Image2</code> deb yoziladi (image_urls tartibida)</li>
                 <li><code>{"{{template_video}}"}</code> / <code>{"{{template_image}}"}</code> — o'ng tomonda yuklangan asl video yoki rasm</li>
+                <li><code>{"{{template_frame}}"}</code> — muqova rasm (videoning 1-kadri). Motion Control: shu kadrda odam almashtiriladi, keyin video harakati o'tkaziladi</li>
                 <li><code>{"{{prev}}"}</code> — oldingi qadam natijasi, <code>{"{{step_0}}"}</code> — 1-qadam natijasi</li>
                 <li>Promptlarni ingliz tilida yozing va "keep the exact same face" qo'shing — yuz o'xshashligi yaxshilanadi</li>
                 <li>Har bir modelni avval fal.ai Playground'da sinab, eng yaxshi parametrlarni shu yerga ko'chiring</li>
               </ul>
             </details>
+          </Card>
+
+          <Card className="p-5">
+            <div className="mb-1 font-semibold">Mijozga variantlar</div>
+            <p className="mb-4 text-sm text-white/50">Mijoz shablon sahifasida variantni o'zi tanlaydi va narxini ko'radi. Asosiy variant — yuqoridagi retsept.</p>
+            {faceAllowed ? (
+              <Toggle checked={hasFace} onChange={toggleFace} label="Arzon «Faqat yuz» variantini qo'shish" />
+            ) : (
+              <p className="text-sm text-white/40">Ko'p personajli shablonlarda variantlar o'chirilgan.</p>
+            )}
+            {f.variants.length > 0 && (
+              <div className="mt-4 space-y-4">
+                <div className="rounded-xl border border-line p-3">
+                  <div className="grid gap-3 sm:grid-cols-[1fr_140px]">
+                    <div><label className="label">Asosiy variant nomi</label><input className="input" value={f.mainLabel} maxLength={40} onChange={(e) => set("mainLabel", e.target.value)} /></div>
+                    <div><label className="label">Narxi</label><div className="input flex items-center gap-1 text-white/60"><Zap className="h-4 w-4 fill-amber-300 text-amber-300" />{f.creditCost} kredit</div></div>
+                  </div>
+                </div>
+                {f.variants.map((v, i) => (
+                  <div key={v.key} className="space-y-3 rounded-xl border border-brand/40 p-3">
+                    <div className="grid gap-3 sm:grid-cols-[1fr_140px]">
+                      <div><label className="label">Variant nomi</label><input className="input" value={v.label} maxLength={40} onChange={(e) => setVariant(i, { label: e.target.value })} /></div>
+                      <div><label className="label">Narxi (kredit)</label><NumInput value={v.creditCost} onChange={(n) => setVariant(i, { creditCost: n })} /></div>
+                    </div>
+                    <div><label className="label">Izoh (mijozga)</label><input className="input" value={v.hint ?? ""} maxLength={120} onChange={(e) => setVariant(i, { hint: e.target.value })} /></div>
+                    <StepEditor steps={v.steps} onChange={(st) => setVariant(i, { steps: st })} />
+                    <p className="text-xs text-white/40">Tannarx: ${variantCost(v).toFixed(2)}. Parametr nomlarini (source_face_url, target_video_url) fal.ai sahifasida tekshiring.</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </Card>
         </div>
 
@@ -392,7 +441,7 @@ export function AdminTemplateEditor() {
             <FilePick label="Namuna video (kartochkada)" accept="video/mp4,video/webm,image/jpeg,image/png,image/webp" current={existing?.previewUrl ?? null} file={files.preview}
               onFile={(x) => setFiles((s) => ({ ...s, preview: x }))} hint="9:16, 5–10 soniya, 10 MB gacha" />
             <FilePick label="Muqova rasm (ixtiyoriy)" accept="image/jpeg,image/png,image/webp" current={existing?.posterUrl ?? null} file={files.poster}
-              onFile={(x) => setFiles((s) => ({ ...s, poster: x }))} hint="Video yuklanguncha ko'rinadi" />
+              onFile={(x) => setFiles((s) => ({ ...s, poster: x }))} hint={/\{\{template_frame\}\}/.test(JSON.stringify(f.steps)) ? "Motion Control uchun shart: videoning 1-kadri (AI tahlil avtomatik qo'yadi)" : "Video yuklanguncha ko'rinadi"} />
             {(needsVideo || existing?.sourceVideoUrl) && (
               <FilePick label={`Asl media (video yoki rasm)${needsVideo ? " *" : ""}`} accept="video/mp4,video/webm,video/quicktime,image/jpeg,image/png,image/webp" current={existing?.sourceVideoUrl ?? null} file={files.sourceVideo}
                 forceVideo={existing?.sourceIsVideo} onFile={(x) => setFiles((s) => ({ ...s, sourceVideo: x }))} hint="Bitta raqqos, butun gavda, kamera qimirlamaydi. Mijozlarga ko'rinmaydi" />
@@ -402,6 +451,9 @@ export function AdminTemplateEditor() {
             <div className="label">Iqtisodiyot</div>
             <div className="flex justify-between"><span className="text-white/60">AI tannarxi</span><b>${costUsd.toFixed(2)} ≈ {formatUzs(costUzs)}</b></div>
             <div className="mt-1 flex justify-between"><span className="text-white/60">Mijoz to'laydi</span><b>{f.creditCost} kredit</b></div>
+            {f.variants.map((v) => (
+              <div key={v.key} className="mt-1 flex justify-between"><span className="text-white/60">«{v.label}»</span><b>${variantCost(v).toFixed(2)} · {v.creditCost} kredit</b></div>
+            ))}
             <p className="mt-2 text-xs text-white/40">1 kredit narxi tarifga qarab ~10 000–15 000 so'm. Tannarx kredit narxining 50% idan oshmasligi tavsiya etiladi.</p>
           </Card>
           {!isNew && existing && (
@@ -417,6 +469,12 @@ export function AdminTemplateEditor() {
 
       <Modal open={testOpen} onClose={() => setTestOpen(false)} title="Shablonni sinab ko'rish">
         <p className="mb-4 text-sm text-white/60">Rasm yuklang — generatsiya sizning hisobingizdan <b>kreditsiz</b> bajariladi (yashirin shablon ham ishlaydi). Haqiqiy AI rejimida fal.ai hisobidan pul yechiladi.</p>
+        {f.variants.length > 0 && (
+          <select className="input mb-3" value={testVariant} onChange={(e) => setTestVariant(e.target.value)}>
+            <option value="">{f.mainLabel}</option>
+            {f.variants.map((v) => <option key={v.key} value={v.key}>{v.label}</option>)}
+          </select>
+        )}
         <input type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => setTestFile(e.target.files?.[0] || null)} className="mb-4 block w-full text-sm text-white/70 file:mr-3 file:rounded-full file:border-0 file:bg-white/10 file:px-4 file:py-2 file:text-white" />
         <Button className="w-full" loading={testing} disabled={!testFile} onClick={runTest}><FlaskConical className="h-4 w-4" />Sinovni boshlash</Button>
       </Modal>
